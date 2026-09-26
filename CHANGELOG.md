@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Nested shells could hide reads and uploads of secret files.** Commands such as
+  `bash -c 'cat .env'`, `cmd /c type .env`, and PowerShell `-Command` were not analyzed
+  inside the executor; uploads hidden the same way could leave the machine before output
+  redaction had any chance to help. wardenv now unwraps Bash, sh, zsh, cmd, PowerShell and
+  pwsh recursively, including transparent `rtk proxy`, sudo/doas options, and mixed nested
+  shells. Quoted documentation and ordinary nested commands remain allowed.
+- 3 paired leak/friction regression tests; 104 tests total.
+
 ## 0.2.0 — 2026-09-23
 
 Adds support for four more agents — Gemini CLI, Cursor, Codex CLI, GitHub Copilot CLI —

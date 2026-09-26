@@ -106,6 +106,54 @@ function stripQuotes(tok) {
 // só que sem depender de nenhum RTK.md.
 const COMMAND_WRAPPERS = ['rtk', 'sudo', 'doas'];
 
+const WRAPPER_OPTIONS_WITH_VALUE = {
+  sudo: new Set([
+    '-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt',
+    '-C', '--close-from', '-T', '--command-timeout', '-R', '--chroot',
+    '-D', '--chdir', '--role', '--type', '--other-user',
+  ]),
+  doas: new Set(['-u', '-C']),
+};
+
+function optionTakesSeparateValue(wrapper, option) {
+  if (option.includes('=')) return false;
+  if (/^-(?:u|g|h|p|C|T|R|D).+/.test(option)) return false; // valor colado: `-uroot`
+  const known = WRAPPER_OPTIONS_WITH_VALUE[wrapper];
+  return known?.has(option) || (option.startsWith('--') && known?.has(option.toLowerCase())) || false;
+}
+
+/** Quantos tokens iniciais pertencem apenas a wrappers transparentes. */
+function wrapperPrefixLength(tokens) {
+  let i = 0;
+  while (i < tokens.length) {
+    const bin = baseCommand(tokens[i]);
+
+    if (bin === 'rtk') {
+      i++;
+      // `rtk proxy <cmd>` executa o comando cru; `proxy` não é o binário real.
+      if (baseCommand(tokens[i]) === 'proxy') i++;
+      continue;
+    }
+
+    if (bin === 'sudo' || bin === 'doas') {
+      i++;
+      while (tokens[i] && tokens[i].startsWith('-')) {
+        const option = tokens[i++];
+        if (optionTakesSeparateValue(bin, option) && tokens[i]) i++;
+      }
+      continue;
+    }
+
+    if (bin === 'env' && tokens[i + 1] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i + 1])) {
+      i += 2;
+      while (tokens[i] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
 /**
  * Descarta um prefixo de wrapper conhecido (`rtk`, `sudo`, `doas`, e
  * atribuições de ambiente como `env FOO=1`) para achar o binário real.
@@ -114,18 +162,7 @@ const COMMAND_WRAPPERS = ['rtk', 'sudo', 'doas'];
  * propósito para não enfraquecer a detecção.
  */
 function skipWrappers(tokens) {
-  let i = 0;
-  while (i < tokens.length) {
-    const t = tokens[i].toLowerCase();
-    if (COMMAND_WRAPPERS.includes(t)) { i++; continue; }
-    if (t === 'env' && tokens[i + 1] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i + 1])) {
-      i += 2;
-      while (tokens[i] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-      continue;
-    }
-    break;
-  }
-  return tokens.slice(i);
+  return tokens.slice(wrapperPrefixLength(tokens));
 }
 
 /**
@@ -134,7 +171,7 @@ function skipWrappers(tokens) {
 function tokenize(cmd) {
   return skipWrappers(
     String(cmd || '')
-      .split(/[\s|;&()<>]+/)
+      .split(/[\s|;&(){}<>]+/)
       .map(stripQuotes)
       .filter(Boolean)
   );
@@ -151,6 +188,150 @@ function baseCommand(token) {
     .toLowerCase()
     .split('/').pop().split('\\').pop()
     .replace(/\.(exe|cmd|bat|com)$/, '');
+}
+
+/**
+ * Separa operadores de shell sem cortar `;`, `|` ou `&&` que estejam dentro
+ * da string passada a um executor. O split simples usado antes transformava
+ * dados citados em comandos aparentes e não serve para desembrulhar shells.
+ */
+function splitCommandSegments(command) {
+  const text = String(command || '');
+  const segments = [];
+  let start = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' || ch === '`') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === ';' || ch === '|' || ch === '&') {
+      const segment = text.slice(start, i).trim();
+      if (segment) segments.push(segment);
+      if (text[i + 1] === ch) i++;
+      start = i + 1;
+    }
+  }
+
+  const tail = text.slice(start).trim();
+  if (tail) segments.push(tail);
+  return segments;
+}
+
+/** Tokeniza preservando o conteúdo de strings e a posição no texto original. */
+function lexWords(command) {
+  const text = String(command || '');
+  const words = [];
+  let value = '';
+  let start = -1;
+  let quote = null;
+
+  const finish = (end) => {
+    if (start < 0) return;
+    words.push({ value, start, end });
+    value = '';
+    start = -1;
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (!quote && /\s/.test(ch)) {
+      finish(i);
+      continue;
+    }
+    if (start < 0) start = i;
+
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else if ((ch === '\\' || ch === '`') && text[i + 1] === quote) {
+        value += text[++i];
+      } else {
+        value += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if ((ch === '\\' || ch === '`') && (text[i + 1] === '"' || text[i + 1] === "'")) {
+      value += text[++i];
+    } else {
+      value += ch;
+    }
+  }
+  finish(text.length);
+  return words;
+}
+
+function executableWordIndex(words) {
+  return wrapperPrefixLength(words.map((word) => word.value));
+}
+
+function commandRemainder(segment, words, flagIndex) {
+  const args = words.slice(flagIndex + 1);
+  if (!args.length) return null;
+  // Uma string única deve perder apenas as aspas externas do executor. Quando
+  // há vários argumentos, preservar o trecho cru mantém aspas que são dados
+  // para o comando interno (`cmd /c echo "type .env"`).
+  if (args.length === 1) return args[0].value;
+  return segment.slice(words[flagIndex].end).trim();
+}
+
+/**
+ * Extrai comandos realmente executados por shells conhecidos. Só considera o
+ * executor na posição de comando, para que texto como `echo "bash -c ..."`
+ * continue sendo dado. A análise recursiva é limitada em analyzeCommand().
+ */
+function nestedShellCommands(command) {
+  const nested = [];
+  for (const segment of splitCommandSegments(command)) {
+    const words = lexWords(segment);
+    const commandIndex = executableWordIndex(words);
+    const shell = baseCommand(words[commandIndex]?.value);
+    let flagIndex = -1;
+
+    if (['bash', 'sh', 'zsh'].includes(shell)) {
+      for (let i = commandIndex + 1; i < words.length; i++) {
+        const option = words[i].value;
+        if (!option.startsWith('-')) break;
+        if (/^-[A-Za-z]*c[A-Za-z]*$/.test(option)) {
+          flagIndex = i;
+          break;
+        }
+      }
+      const inner = words[flagIndex + 1]?.value;
+      if (flagIndex >= 0 && inner) nested.push({ shell, command: inner });
+      continue;
+    }
+
+    if (shell === 'cmd') {
+      flagIndex = words.findIndex((word, i) => i > commandIndex && /^[/\-]c$/i.test(word.value));
+    } else if (shell === 'powershell' || shell === 'pwsh') {
+      flagIndex = words.findIndex((word, i) => i > commandIndex && /^-(?:command|c)$/i.test(word.value));
+    }
+
+    if (flagIndex >= 0) {
+      const inner = commandRemainder(segment, words, flagIndex);
+      if (inner) nested.push({ shell, command: inner });
+    }
+  }
+  return nested;
 }
 
 /**
@@ -226,7 +407,7 @@ const SELF_DISARM = [
 
 /** Testa desarme em cada segmento, para pegar `foo && wardenv unlock`. */
 function isSelfDisarm(raw) {
-  const segments = String(raw).split(/&&|\|\||[;|]/).map((s) => s.trim()).filter(Boolean);
+  const segments = splitCommandSegments(raw);
   return segments.some((seg) => SELF_DISARM.some((re) => re.test(seg)));
 }
 
@@ -268,7 +449,7 @@ function stripLiterals(text) {
     .replace(/'[^']*'/g, keepIfTarget);
 }
 
-function analyzeCommand(cmd) {
+function analyzeCommand(cmd, depth = 0) {
   const raw = String(cmd || '');
   if (!raw.trim()) return { action: 'allow' };
 
@@ -280,13 +461,28 @@ function analyzeCommand(cmd) {
     return { action: 'block', reason: 'attempt to disarm wardenv' };
   }
 
+  // Um shell não muda o risco do comando que executa. Desembrulhar antes de
+  // apagar literais fecha `bash -c 'cat .env'`, `cmd /c type .env` e seus
+  // equivalentes PowerShell, inclusive quando encadeados. O limite impede que
+  // entrada adversarial force recursão sem fim sem reduzir o uso normal.
+  let nestedRedact = null;
+  if (depth < 6) {
+    for (const nested of nestedShellCommands(raw)) {
+      const verdict = analyzeCommand(nested.command, depth + 1);
+      if (verdict.action === 'block') {
+        return { ...verdict, reason: `${nested.shell} executes: ${verdict.reason}` };
+      }
+      if (verdict.action === 'redact') nestedRedact = nestedRedact || verdict;
+    }
+  }
+
   // Interpretador com script na linha: o alvo está dentro da string, então
   // precisa ser procurado no texto CRU, antes de `stripLiterals`. Cada segmento
   // é testado separadamente para não confundir `node -e "..."` com um `cat .env`
   // que venha depois de um `&&`.
   // Envio de segredo pela rede. Também no texto cru: `-F "f=@.env"` entre aspas
   // seria apagado por stripLiterals.
-  for (const seg of raw.split(/&&|\|\||[;|]/)) {
+  for (const seg of splitCommandSegments(raw)) {
     const bin = baseCommand(tokenize(seg)[0]);
     if (!UPLOADERS.includes(bin)) continue;
     const src = findUploadSource(seg);
@@ -297,7 +493,7 @@ function analyzeCommand(cmd) {
     }
   }
 
-  for (const seg of raw.split(/&&|\|\||[;|]/)) {
+  for (const seg of splitCommandSegments(raw)) {
     if (!INLINE_SCRIPT.test(seg) || !SCRIPT_READ.test(seg)) continue;
     const found = findSecretPathToken(seg.replace(/["']/g, ' '));
     if (found.hit) {
@@ -336,6 +532,8 @@ function analyzeCommand(cmd) {
   if (mention) {
     return { action: 'redact', reason: `mentions ${mention.token}`, token: mention.token };
   }
+
+  if (nestedRedact) return nestedRedact;
 
   for (const re of EMITTERS) {
     if (re.test(text)) {
