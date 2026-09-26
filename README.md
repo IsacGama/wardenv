@@ -6,7 +6,7 @@
 
 [![npm](https://img.shields.io/npm/v/wardenv?color=black)](https://www.npmjs.com/package/wardenv)
 [![license](https://img.shields.io/badge/license-MIT-black)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-101%20passing-black)](./test/wardenv.test.js)
+[![tests](https://img.shields.io/badge/tests-105%20passing-black)](./test/wardenv.test.js)
 [![deps](https://img.shields.io/badge/dependencies-0-black)](./package.json)
 
 <a href="https://www.buymeacoffee.com/natanaelisidoro"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=natanaelisidoro&button_colour=FF5F5F&font_colour=ffffff&font_family=Poppins&outline_colour=000000&coffee_colour=FFDD00" alt="Buy me a coffee" height="40"></a>
@@ -341,6 +341,12 @@ which is why the table above still says "unverified" for everything but Claude C
 Redaction is not hermetic. It catches known values from your `.env` files and known secret
 shapes. A secret in an exotic format that never passed through a `.env` can slip through.
 The surface shrinks a lot; it doesn't reach zero.
+
+Known-value discovery checks the working directory, two parents, and descendants up to
+four levels deep. Descendant traversal is capped at 256 directories and skips dependency,
+VCS, cache, coverage and build trees. That covers normal monorepos without turning every
+hook call into an unbounded filesystem crawl; a workspace beyond those limits may still
+need the agent to run from the relevant package directory.
 
 It doesn't retroactively clean context from sessions that ran before install.
 

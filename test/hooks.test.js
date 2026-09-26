@@ -19,6 +19,7 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 
 const HOOK = path.join(__dirname, '..', 'hooks', 'pre-tool.js');
+const POST = path.join(__dirname, '..', 'hooks', 'post-tool.js');
 const { revokeAll, grant } = require('../src/lib/unlock');
 
 function runHook(payload) {
@@ -31,6 +32,14 @@ function runHook(payload) {
   } catch (e) {
     throw new Error('hook process failed: ' + e.message);
   }
+}
+
+function runPost(cwd, output) {
+  const out = execFileSync(process.execPath, [POST], {
+    input: JSON.stringify({ cwd, tool_name: 'Bash', tool_output: output }),
+    encoding: 'utf8',
+  });
+  return out.trim() ? JSON.parse(out).hookSpecificOutput : null;
 }
 
 function isDenied(result) {
@@ -165,26 +174,58 @@ test('PostToolUse: objeto {stdout} é redigido sem virar blob JSON', () => {
   // Antes, tool_output não-string era serializado com JSON.stringify e o JSON
   // voltava como updatedOutput — trocando a saída estruturada por um blob,
   // e só quando havia redação, o que tornava o efeito invisível.
-  const POST = path.join(__dirname, '..', 'hooks', 'post-tool.js');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-post-'));
   const secret = 'abcdefghijklmnopqrstuvwxyz012345';
   fs.writeFileSync(path.join(dir, '.env'), `API_TOKEN=${secret}\n`);
 
-  const out = execFileSync(process.execPath, [POST], {
-    input: JSON.stringify({
-      cwd: dir,
-      tool_name: 'Bash',
-      tool_output: { stdout: `token=${secret}`, stderr: '', exitCode: 0 },
-    }),
-    encoding: 'utf8',
-  });
-
-  const res = JSON.parse(out).hookSpecificOutput;
+  const res = runPost(dir, { stdout: `token=${secret}`, stderr: '', exitCode: 0 });
   const updated = res.updatedOutput;
   assert.equal(typeof updated, 'object', 'a forma do objeto deveria ser preservada');
   assert.equal(updated.exitCode, 0, 'campos não-texto passam intactos');
   assert.ok(!JSON.stringify(updated).includes(secret), 'o valor deveria ter sumido');
   assert.ok(updated.stdout.includes('wardenv:API_TOKEN'), 'stdout deveria estar mascarado');
+});
+
+test('PostToolUse: output acima de 400 mil caracteres continua sendo redigido', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-post-large-'));
+  const secret = 'large-output-secret-123456';
+  fs.writeFileSync(path.join(dir, '.env'), `API_TOKEN=${secret}\n`);
+
+  const res = runPost(dir, `${'x'.repeat(400_001)} token=${secret}`);
+  assert.ok(res, 'hook deveria responder quando encontra segredo no output grande');
+  assert.doesNotMatch(res.updatedOutput, new RegExp(secret));
+  assert.match(res.updatedOutput, /«wardenv:API_TOKEN»/);
+});
+
+test('PostToolUse: objeto profundamente aninhado é redigido sem perder a forma', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-post-deep-'));
+  const secret = 'deep-output-secret-123456';
+  fs.writeFileSync(path.join(dir, '.env'), `API_TOKEN=${secret}\n`);
+
+  const output = { level: 0 };
+  let leaf = output;
+  for (let i = 1; i <= 10; i++) leaf = leaf.child = { level: i };
+  leaf.message = `token=${secret}`;
+
+  const res = runPost(dir, output);
+  let updatedLeaf = res.updatedOutput;
+  for (let i = 1; i <= 10; i++) updatedLeaf = updatedLeaf.child;
+  assert.equal(updatedLeaf.level, 10, 'estrutura profunda deveria sobreviver');
+  assert.match(updatedLeaf.message, /«wardenv:API_TOKEN»/);
+  assert.doesNotMatch(JSON.stringify(res.updatedOutput), new RegExp(secret));
+});
+
+test('PostToolUse: comando na raiz encontra segredo em .env de subprojeto', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-post-monorepo-'));
+  const app = path.join(root, 'apps', 'web');
+  const secret = 'workspace-output-secret-123456';
+  fs.mkdirSync(app, { recursive: true });
+  fs.writeFileSync(path.join(app, '.env'), `WEB_TOKEN=${secret}\n`);
+
+  const res = runPost(root, `server said token=${secret}`);
+  assert.ok(res, 'hook deveria indexar o .env do subprojeto');
+  assert.match(res.updatedOutput, /«wardenv:WEB_TOKEN»/);
+  assert.doesNotMatch(res.updatedOutput, new RegExp(secret));
 });
 
 // --------------------------------------------- envio pela rede (curl)

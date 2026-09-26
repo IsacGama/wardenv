@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Output redaction silently skipped large and deeply nested results.** A string over
+  400,000 characters was returned untouched, and strings nested beyond four object levels
+  were never scanned. The post-tool hook now walks structured output iteratively at any
+  depth and redacts strings regardless of size while preserving the original shape.
+- **Commands run from a monorepo root did not know secrets stored in package-level `.env`
+  files.** Known-value discovery now scans descendants with strict depth/directory bounds,
+  skips dependency/build trees and templates, and recognizes both `.env.local` and
+  `env.local` conventions.
+- 4 output/monorepo regression tests; 105 tests total.
+
 ## 0.2.0 — 2026-09-23
 
 Adds support for four more agents — Gemini CLI, Cursor, Codex CLI, GitHub Copilot CLI —

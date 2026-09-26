@@ -59,45 +59,80 @@ const SHAPES = [
   [new RegExp(`${PEM_OPEN}[A-Z ]*PRIVATE KEY-----[\\s\\S]*?${PEM_CLOSE}[A-Z ]*PRIVATE KEY-----`, 'g'), 'private-key'],
 ];
 
-const ENV_FILE_RE = /^\.env($|\.)/i;
+const ENV_FILE_RE = /^\.?env($|\.)/i;
+const TEMPLATE_SUFFIX_RE = /\.(example|sample|template|dist|defaults)$/i;
+const DESCENT_SKIP = new Set([
+  '.git', '.hg', '.svn', 'node_modules', 'vendor', 'dist', 'build', 'coverage',
+  '.next', '.nuxt', '.cache', '.turbo', '.venv', 'venv',
+]);
+const MAX_DESCENDANT_DEPTH = 4;
+const MAX_DESCENDANT_DIRS = 256;
+
+function addEnvSecrets(file, name, found, seen) {
+  const resolved = path.resolve(file);
+  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  if (seen.has(key) || !ENV_FILE_RE.test(name) || TEMPLATE_SUFFIX_RE.test(name)) return;
+  seen.add(key);
+
+  let raw = '';
+  try {
+    raw = fs.readFileSync(resolved, 'utf8');
+  } catch {
+    return;
+  }
+  for (const [envKey, value] of parseEnv(raw)) {
+    if (value.length >= MIN_VALUE_LEN && !PUBLIC_KEYS.test(envKey)) found.set(value, envKey);
+  }
+}
+
+function entriesIn(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
 
 /**
- * Lê os arquivos .env alcançáveis a partir de um diretório (o próprio e
- * até 2 níveis acima, cobrindo monorepo) e devolve pares nome→valor.
+ * Lê arquivos .env alcançáveis a partir de um diretório: o próprio,
+ * até 2 pais e descendentes limitados. Subir cobre uma tool executada dentro
+ * de um pacote; descer cobre a mesma tool executada na raiz de um monorepo.
+ * A busca descendente ignora dependências/builds, não segue diretórios
+ * simbólicos e tem limites duros de profundidade e quantidade de diretórios.
  */
-function collectKnownSecrets(cwd, maxUp = 2) {
+function collectKnownSecrets(cwd, maxUp = 2, { maxDown = MAX_DESCENDANT_DEPTH, maxDirs = MAX_DESCENDANT_DIRS } = {}) {
   const found = new Map();
-  let dir = cwd;
+  const seenFiles = new Set();
+  const start = path.resolve(cwd || process.cwd());
+  let dir = start;
 
   for (let i = 0; i <= maxUp && dir; i++) {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir);
-    } catch {
-      break;
-    }
-
-    for (const name of entries) {
-      if (!ENV_FILE_RE.test(name)) continue;
-      // Template não tem segredo — e ler ele só geraria ruído.
-      if (/\.(example|sample|template|dist|defaults)$/i.test(name)) continue;
-
-      let raw = '';
-      try {
-        raw = fs.readFileSync(path.join(dir, name), 'utf8');
-      } catch {
-        continue;
-      }
-      for (const [k, v] of parseEnv(raw)) {
-        if (v.length >= MIN_VALUE_LEN && !PUBLIC_KEYS.test(k)) {
-          found.set(v, k);
-        }
-      }
+    for (const entry of entriesIn(dir)) {
+      if (entry.isFile() || entry.isSymbolicLink()) addEnvSecrets(path.join(dir, entry.name), entry.name, found, seenFiles);
     }
 
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+
+  const queue = [{ dir: start, depth: 0 }];
+  let visited = 0;
+  while (queue.length && visited < maxDirs) {
+    const current = queue.shift();
+    visited++;
+    for (const entry of entriesIn(current.dir)) {
+      const child = path.join(current.dir, entry.name);
+      if (entry.isFile() || entry.isSymbolicLink()) {
+        addEnvSecrets(child, entry.name, found, seenFiles);
+      } else if (
+        entry.isDirectory() &&
+        current.depth < maxDown &&
+        !DESCENT_SKIP.has(entry.name.toLowerCase())
+      ) {
+        queue.push({ dir: child, depth: current.depth + 1 });
+      }
+    }
   }
 
   return found;
@@ -157,6 +192,48 @@ function redactText(text, knownSecrets) {
 }
 
 /**
+ * Redige todas as strings de um valor estruturado sem limite artificial de
+ * tamanho ou profundidade. O percurso iterativo evita stack overflow e
+ * preserva arrays, objetos e referências repetidas.
+ * @returns {{value: *, hits: string[]}}
+ */
+function redactDeep(value, knownSecrets) {
+  const hits = [];
+  const cleanString = (text) => {
+    const result = redactText(text, knownSecrets);
+    hits.push(...result.hits);
+    return result.text;
+  };
+
+  if (typeof value === 'string') return { value: cleanString(value), hits: [...new Set(hits)] };
+  if (value == null || typeof value !== 'object') return { value, hits: [] };
+
+  const root = Array.isArray(value) ? [] : {};
+  const seen = new WeakMap([[value, root]]);
+  const stack = [{ source: value, target: root }];
+
+  while (stack.length) {
+    const { source, target } = stack.pop();
+    for (const [key, item] of Object.entries(source)) {
+      if (typeof item === 'string') {
+        target[key] = cleanString(item);
+      } else if (item == null || typeof item !== 'object') {
+        target[key] = item;
+      } else if (seen.has(item)) {
+        target[key] = seen.get(item);
+      } else {
+        const child = Array.isArray(item) ? [] : {};
+        seen.set(item, child);
+        target[key] = child;
+        stack.push({ source: item, target: child });
+      }
+    }
+  }
+
+  return { value: root, hits: [...new Set(hits)] };
+}
+
+/**
  * Resumo seguro de um arquivo .env: nomes das chaves, nunca os valores.
  * É o que o agente recebe no lugar do conteúdo bloqueado.
  */
@@ -178,6 +255,7 @@ function summarizeEnvFile(filePath) {
 module.exports = {
   collectKnownSecrets,
   redactText,
+  redactDeep,
   summarizeEnvFile,
   parseEnv,
   MASK,

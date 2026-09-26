@@ -11,7 +11,7 @@ const assert = require('node:assert');
 
 const { classifyPath } = require('../src/lib/targets');
 const { analyzeCommand } = require('../src/lib/command');
-const { redactText, parseEnv } = require('../src/lib/redact');
+const { collectKnownSecrets, redactText, parseEnv } = require('../src/lib/redact');
 
 // ---------------------------------------------------------------- caminhos
 
@@ -93,6 +93,28 @@ test('redige valores conhecidos vindos do .env', () => {
   assert.ok(!text.includes('Sup3rS3cr3tPassword123'), 'valor vazou');
   assert.ok(text.includes('«wardenv:DB_PASSWORD»'));
   assert.deepEqual(hits, ['DB_PASSWORD']);
+});
+
+test('redige segredos de .env em subprojetos do monorepo, mas ignora dependências e templates', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-monorepo-'));
+  const app = path.join(root, 'apps', 'web');
+  const dependency = path.join(root, 'node_modules', 'fixture');
+  fs.mkdirSync(app, { recursive: true });
+  fs.mkdirSync(dependency, { recursive: true });
+
+  const appSecret = 'monorepo-secret-123456';
+  const ignoredSecret = 'dependency-secret-123456';
+  fs.writeFileSync(path.join(app, 'env.local'), `APP_TOKEN=${appSecret}\n`);
+  fs.writeFileSync(path.join(app, '.env.example'), 'EXAMPLE_TOKEN=template-value-123456\n');
+  fs.writeFileSync(path.join(dependency, '.env'), `DEP_TOKEN=${ignoredSecret}\n`);
+
+  const known = collectKnownSecrets(root);
+  assert.equal(known.get(appSecret), 'APP_TOKEN');
+  assert.equal(known.has('template-value-123456'), false, 'template não deveria entrar no índice');
+  assert.equal(known.has(ignoredSecret), false, 'node_modules não deveria ser percorrido');
 });
 
 test('rotula cada forma de segredo corretamente', () => {
