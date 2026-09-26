@@ -12,7 +12,7 @@
   files.** Known-value discovery now scans descendants with strict depth/directory bounds,
   skips dependency/build trees and templates, and recognizes both `.env.local` and
   `env.local` conventions.
-- 4 output/monorepo regression tests; 105 tests total.
+- 5 output/monorepo regression tests; 106 tests total.
 
 ## 0.2.0 — 2026-09-23
 

@@ -59,7 +59,7 @@ const SHAPES = [
   [new RegExp(`${PEM_OPEN}[A-Z ]*PRIVATE KEY-----[\\s\\S]*?${PEM_CLOSE}[A-Z ]*PRIVATE KEY-----`, 'g'), 'private-key'],
 ];
 
-const ENV_FILE_RE = /^\.?env($|\.)/i;
+const ENV_FILE_RE = /^(?:\.env(?:$|\.)|env\.[a-z0-9]+$)/i;
 const TEMPLATE_SUFFIX_RE = /\.(example|sample|template|dist|defaults)$/i;
 const DESCENT_SKIP = new Set([
   '.git', '.hg', '.svn', 'node_modules', 'vendor', 'dist', 'build', 'coverage',
@@ -128,7 +128,8 @@ function collectKnownSecrets(cwd, maxUp = 2, { maxDown = MAX_DESCENDANT_DEPTH, m
       } else if (
         entry.isDirectory() &&
         current.depth < maxDown &&
-        !DESCENT_SKIP.has(entry.name.toLowerCase())
+        !DESCENT_SKIP.has(entry.name.toLowerCase()) &&
+        visited + queue.length < maxDirs
       ) {
         queue.push({ dir: child, depth: current.depth + 1 });
       }

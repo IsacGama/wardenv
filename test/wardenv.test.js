@@ -107,14 +107,34 @@ test('redige segredos de .env em subprojetos do monorepo, mas ignora dependênci
 
   const appSecret = 'monorepo-secret-123456';
   const ignoredSecret = 'dependency-secret-123456';
+  const bareEnvValue = 'bare-env-value-123456';
   fs.writeFileSync(path.join(app, 'env.local'), `APP_TOKEN=${appSecret}\n`);
+  fs.writeFileSync(path.join(app, 'env'), `NOT_AN_ENV_FILE=${bareEnvValue}\n`);
   fs.writeFileSync(path.join(app, '.env.example'), 'EXAMPLE_TOKEN=template-value-123456\n');
   fs.writeFileSync(path.join(dependency, '.env'), `DEP_TOKEN=${ignoredSecret}\n`);
 
   const known = collectKnownSecrets(root);
   assert.equal(known.get(appSecret), 'APP_TOKEN');
+  assert.equal(known.has(bareEnvValue), false, 'arquivo nu chamado env não é env.<sufixo>');
   assert.equal(known.has('template-value-123456'), false, 'template não deveria entrar no índice');
   assert.equal(known.has(ignoredSecret), false, 'node_modules não deveria ser percorrido');
+});
+
+test('descoberta descendente limita a fila, não apenas diretórios já visitados', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-monorepo-bound-'));
+
+  for (let i = 0; i < 8; i++) {
+    const dir = path.join(root, `package-${String(i).padStart(2, '0')}`);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, '.env'), `TOKEN_${i}=bounded-secret-${i}-123456\n`);
+  }
+
+  const known = collectKnownSecrets(root, 0, { maxDown: 1, maxDirs: 2 });
+  assert.equal(known.has('bounded-secret-0-123456'), true, 'primeiro descendente deveria ser visitado');
+  assert.equal(known.has('bounded-secret-1-123456'), false, 'fila não deveria ultrapassar maxDirs');
 });
 
 test('rotula cada forma de segredo corretamente', () => {
