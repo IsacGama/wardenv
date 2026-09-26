@@ -141,6 +141,25 @@ test('install: Codex com hooks de ferramenta (0.129+) instala, reinstala sem dup
   assert.ok(hooked(codexFile), 'Codex 0.156 deveria receber o hook (não verificado, mas instalado)');
   assert.match(fs.readFileSync(codexFile, 'utf8'), /third-party/, 'hook de terceiro deveria sobreviver à instalação');
 
+  const installed = JSON.parse(fs.readFileSync(codexFile, 'utf8'));
+  const pre = installed.hooks.PreToolUse.find((group) => group.hooks.some((hook) => /wardenv[\\/]hooks/.test(hook.command)));
+  const post = installed.hooks.PostToolUse.find((group) => group.hooks.some((hook) => /wardenv[\\/]hooks/.test(hook.command)));
+  assert.equal(pre.matcher, '*', 'PreToolUse deveria cobrir toda tool local/MCP');
+  assert.equal(post.matcher, '*', 'PostToolUse deveria redigir output de toda tool local/MCP');
+
+  if (process.platform === 'win32') {
+    const registered = pre.hooks[0].commandWindows;
+    assert.match(registered, /^& /, 'Codex deveria receber commandWindows válido para PowerShell');
+    const probe = path.join(home, 'codex-probe.ps1');
+    fs.writeFileSync(probe, registered);
+    const payload = JSON.stringify({ cwd: home, tool_name: 'Bash', tool_input: { command: 'cat .env' } });
+    const invoked = spawnSync('powershell', ['-NoProfile', '-File', probe], { input: payload, encoding: 'utf8' });
+    assert.equal(invoked.status, 0, invoked.stderr);
+    assert.equal(JSON.parse(invoked.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  } else {
+    assert.equal(pre.hooks[0].commandWindows, undefined);
+  }
+
   const beforeReinstall = (fs.readFileSync(codexFile, 'utf8').match(/wardenv[\\/]+hooks/gi) || []).length;
   const explicit = runInstall(['codex'], env);
   assert.equal(explicit.status, 0, 'reinstalar não deveria falhar');
@@ -172,6 +191,60 @@ test('install: Codex sem hooks de ferramenta (< 0.129) recusa a instalação em 
   assert.match(r.stderr, /0\.129|tool hooks/i);
   const codexFile = path.join(home, '.codex', 'hooks.json');
   assert.ok(!fs.existsSync(codexFile), 'nada deveria ter sido escrito');
+});
+
+test('install: Codex recusa quando config.toml desliga ou ignora hooks de usuário', () => {
+  for (const [name, config, expected] of [
+    ['disabled', '\uFEFF[features]\nhooks = false\n', /disables Codex hooks/i],
+    ['legacy-disabled', '[features]\ncodex_hooks = false\n', /disables Codex hooks/i],
+    ['managed-only', 'allow_managed_hooks_only = true\n', /managed Codex hooks/i],
+  ]) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), `wardenv-install-codex-${name}-`));
+    const codexDir = path.join(home, '.codex');
+    fs.mkdirSync(codexDir);
+    fs.writeFileSync(path.join(codexDir, 'config.toml'), config);
+
+    const env = { ...fakeExecutableOnPath(home, 'codex', '0.156.0'), CODEX_HOME: codexDir };
+    const result = spawnSync(process.execPath, ['-e', [
+      `require('os').homedir = () => ${JSON.stringify(home)};`,
+      `process.argv = [process.execPath, 'install.js', 'codex'];`,
+      `require(${JSON.stringify(INSTALL)});`,
+    ].join('\n')], { encoding: 'utf8', env });
+
+    assert.equal(result.status, 1, name);
+    assert.match(result.stderr, expected);
+    assert.equal(fs.existsSync(path.join(codexDir, 'hooks.json')), false, 'nada deveria ser instalado');
+  }
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-install-codex-enabled-'));
+  const codexDir = path.join(home, '.codex');
+  fs.mkdirSync(codexDir);
+  fs.writeFileSync(path.join(codexDir, 'config.toml'), '[features]\nhooks = true # hooks = false is documentation only\n');
+  const env = { ...fakeExecutableOnPath(home, 'codex', '0.156.0'), CODEX_HOME: codexDir };
+  const allowed = spawnSync(process.execPath, ['-e', [
+    `require('os').homedir = () => ${JSON.stringify(home)};`,
+    `process.argv = [process.execPath, 'install.js', 'codex'];`,
+    `require(${JSON.stringify(INSTALL)});`,
+  ].join('\n')], { encoding: 'utf8', env });
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.equal(fs.existsSync(path.join(codexDir, 'hooks.json')), true);
+
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-install-codex-project-'));
+  fs.mkdirSync(path.join(project, '.codex'));
+  fs.writeFileSync(path.join(project, '.codex', 'config.toml'), '[features]\nhooks = false\n');
+  const projectHome = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-install-codex-project-home-'));
+  fs.mkdirSync(path.join(projectHome, '.codex'));
+  const projectEnv = {
+    ...fakeExecutableOnPath(projectHome, 'codex', '0.156.0'),
+    CODEX_HOME: path.join(projectHome, '.codex'),
+  };
+  const projectResult = spawnSync(process.execPath, ['-e', [
+    `require('os').homedir = () => ${JSON.stringify(projectHome)};`,
+    `process.argv = [process.execPath, 'install.js', 'codex'];`,
+    `require(${JSON.stringify(INSTALL)});`,
+  ].join('\n')], { cwd: project, encoding: 'utf8', env: projectEnv });
+  assert.equal(projectResult.status, 1, 'config local do projeto também pode desligar hooks');
+  assert.match(projectResult.stderr, /disables Codex hooks/i);
 });
 
 test('install: o comando registrado para Cursor é sintaxe PowerShell válida no Windows', () => {

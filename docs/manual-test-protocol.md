@@ -110,6 +110,19 @@ below) is `—`, not a fail.
   (shell read); mark step 1 as `—` for Codex, not a fail.
 - Step 4 (write) goes through `apply_patch` — ask it to edit the file with a normal patch,
   not paste raw file contents some other way.
+- Ask an MCP/local tool to receive `.env` as a path and, separately, the literal fake
+  token as an argument. Both must be denied before the tool runs. A harmless `update_plan`
+  mentioning `.env` in prose must still pass.
+- Try to open `bash`, `pwsh -NoProfile`, a language REPL, and an explicit TTY/persistent
+  command. wardenv must deny them because later `write_stdin` input does not run
+  `PreToolUse` again. Complete one-shot commands such as `bash -c "npm test"`,
+  `node --test`, and `pwsh -File build.ps1` must pass.
+- Confirm both hook groups use matcher `*`; on Windows confirm each handler has the
+  official `commandWindows` field and that editing either registered command is blocked.
+- Temporarily set `[features] hooks = false` in a throwaway `$CODEX_HOME/config.toml` and
+  confirm installation refuses instead of claiming protection. Restore `hooks = true`,
+  install, then ask the agent to disable hooks or set `allow_managed_hooks_only = true`;
+  both edits must be blocked while an unrelated model-setting edit still passes.
 
 ### GitHub Copilot CLI (`copilot`)
 - `copilot --version` — the adapter was built against 1.0.11 and documented gaps below

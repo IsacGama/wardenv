@@ -425,6 +425,9 @@ test('auto-desarme: desvios da forma direta também são bloqueados', () => {
     ['node "C:\\npm\\node_modules\\', W, '\\src\\cli.js" unlock ', E].join(''),
     ['node -e "require(\'C:/x/', W, '/src/lib/unlock\').grant(process.cwd(),\'', E, '\')"'].join(''),
     ['Start-Process ', W, ' -ArgumentList \'unlock\',\'', E, '\''].join(''),
+    'echo "[features] hooks = false" > ~/.codex/config.toml',
+    'echo "[features] hooks = false" > ".codex/config.toml"',
+    'Set-Content ~/.codex/config.toml "allow_managed_hooks_only = true"',
     // Forjar o TTY e chamar a CLI por dentro de um one-liner.
     ['echo ', E, ' | node -e "process.stdin.isTTY=true;process.stdout.isTTY=true;',
       'process.argv.push(\'unlock\',\'', E, '\');require(\'C:/npm/', W, '/src/cli.js\')"'].join(''),
@@ -485,6 +488,54 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
   assert.equal(checkWrite({ filePath: settings, body: '{"hooks":{}}' }).block, true, 'Write sem o hook');
   assert.equal(checkWrite({ filePath: settings, edits: [{ old: '"theme"', new: '"disableAllHooks": true, "theme"' }] }).block, true, 'disableAllHooks');
   assert.equal(checkWrite({ filePath: settings, body: raw.slice(0, -5) }).block, true, 'JSON quebrado');
+
+  // Codex pode registrar um override oficial só para Windows. Alterar apenas
+  // commandWindows desarma o hook naquela plataforma e precisa ser bloqueado.
+  const codex = pathMod.join(home, '.codex', 'hooks.json');
+  fs.mkdirSync(pathMod.dirname(codex), { recursive: true });
+  const windowsCommand = `& ${cmd} --agent codex`;
+  const codexCfg = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{
+    type: 'command',
+    command: cmd,
+    commandWindows: windowsCommand,
+  }] }] } };
+  fs.writeFileSync(codex, JSON.stringify(codexCfg, null, 2));
+  assert.equal(
+    checkWrite({ filePath: codex, edits: [{ old: '--agent codex', new: '--agent claude' }] }).block,
+    true,
+    'alterar commandWindows do Codex'
+  );
+
+  const codexToml = pathMod.join(home, '.codex', 'config.toml');
+  const toml = 'model = "gpt-6-sol"\n\n[features]\nhooks = true\n';
+  fs.writeFileSync(codexToml, toml);
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'hooks = true', new: 'hooks = false' }] }).block,
+    true,
+    'desligar hooks no config.toml'
+  );
+  assert.equal(
+    checkWrite({ filePath: codexToml, body: `allow_managed_hooks_only = true\n${toml}` }).block,
+    true,
+    'ignorar hooks de usuário no config.toml'
+  );
+
+  const previousCodexHome = process.env.CODEX_HOME;
+  const customCodexHome = pathMod.join(home, 'custom-codex-home');
+  try {
+    process.env.CODEX_HOME = customCodexHome;
+    fs.mkdirSync(customCodexHome);
+    const customHooks = pathMod.join(customCodexHome, 'hooks.json');
+    fs.writeFileSync(customHooks, JSON.stringify(codexCfg, null, 2));
+    assert.equal(
+      checkWrite({ filePath: customHooks, edits: [{ old: '--agent codex', new: '--agent claude' }] }).block,
+      true,
+      'proteger hooks.json sob CODEX_HOME customizado'
+    );
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+  }
 });
 
 test('atrito: editar a config do agente sem tocar no wardenv continua liberado', () => {
@@ -507,6 +558,15 @@ test('atrito: editar a config do agente sem tocar no wardenv continua liberado',
   // Config que ainda não tem o wardenv: nada a proteger.
   const other = pathMod.join(fs.mkdtempSync(pathMod.join(os.tmpdir(), 'wardenv-cfg-none-')), '.claude', 'settings.json');
   assert.equal(checkWrite({ filePath: other, body: '{"hooks":{}}' }).block, false);
+
+  const codexToml = pathMod.join(home, '.codex', 'config.toml');
+  fs.mkdirSync(pathMod.dirname(codexToml), { recursive: true });
+  fs.writeFileSync(codexToml, 'model = "gpt-6-sol"\n\n[features]\nhooks = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'gpt-6-sol', new: 'gpt-6-astra' }] }).block,
+    false,
+    'trocar modelo não desarma hooks'
+  );
 });
 
 // ------------------------------------------------------ wrappers transparentes

@@ -3,15 +3,17 @@
 //
 // O formato de resposta é o mesmo do Claude. O que muda é a entrada:
 //   - todo shell chega como tool "Bash", inclusive PowerShell no Windows;
-//   - não existe tool de leitura: arquivo se lê pelo shell;
 //   - escrita é "apply_patch", com o patch cru em tool_input.command. Um patch
 //     pode mexer em vários arquivos, então vira uma tentativa por arquivo.
+//   - MCPs e outras tools locais também disparam hooks. Como seus argumentos
+//     variam, caminhos/valores/commands são extraídos conservadoramente.
 //
 // Codex trata deny sem reason como inválido e deixa passar, por isso o render
 // nunca manda reason vazio.
 
 const path = require('path');
 const claude = require('./claude');
+const { classifyPath } = require('../../src/lib/targets');
 
 function base(data) {
   return {
@@ -71,12 +73,98 @@ function parsePatch(text) {
   return files;
 }
 
+function stringLeaves(value, key = '', out = []) {
+  if (typeof value === 'string') {
+    out.push({ key, value });
+  } else if (Array.isArray(value)) {
+    for (const item of value) stringLeaves(item, key, out);
+  } else if (value && typeof value === 'object') {
+    for (const [childKey, child] of Object.entries(value)) stringLeaves(child, childKey, out);
+  }
+  return out;
+}
+
+function commandHead(command) {
+  const raw = String(command || '').trim();
+  const match = /^(?:&\s*)?(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(raw);
+  const executable = match ? match[1] || match[2] || match[3] || '' : '';
+  const bin = executable.toLowerCase().split('/').pop().split('\\').pop().replace(/\.(exe|cmd|bat|com)$/, '');
+  return { bin, args: match ? raw.slice(match[0].length).trim() : '' };
+}
+
+/**
+ * Uma sessão interativa permite que `write_stdin` execute texto que nunca
+ * passa por outro PreToolUse. Bloqueamos apenas shells/REPLs sem programa,
+ * `-c`, `-e`, `-m` ou arquivo explícito; comandos normais seguem livres.
+ */
+function isInteractiveSession(command) {
+  const raw = String(command || '').trim();
+  if (!raw) return false;
+  const { bin, args } = commandHead(raw);
+  const tokens = args ? args.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [] : [];
+  if (tokens.some((t) => /^(?:-h|--help|-v|--version|\/\?)$/i.test(t))) return false;
+
+  if (['bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'pwsh', 'powershell'].includes(bin)) {
+    if (tokens.some((t) => /^(?:-i|--interactive|-noexit)$/i.test(t))) return true;
+    const commandAt = tokens.findIndex((t) => /^(?:-c|--command|-command|-file)$/i.test(t));
+    if (commandAt >= 0) {
+      const payload = (tokens[commandAt + 1] || '').replace(/^['"]|['"]$/g, '');
+      return (bin === 'pwsh' || bin === 'powershell') && (!payload || payload === '-');
+    }
+    return tokens.every((t) => /^[-/]/.test(t));
+  }
+  if (bin === 'cmd') {
+    return !tokens.some((t) => /^\/[c]$/i.test(t));
+  }
+  if (['deno', 'bun'].includes(bin) && /^repl$/i.test(tokens[0] || '')) return true;
+  if (bin === 'node' && tokens.some((t) => /^(?:--test|--check)$/i.test(t))) return false;
+  if (bin === 'irb') return true;
+  if (['node', 'deno', 'bun', 'python', 'python3', 'ruby', 'php'].includes(bin)) {
+    if (tokens.some((t) => /^(?:-i|--interactive)$/i.test(t))) return true;
+    if (bin === 'php' && tokens.some((t) => /^-a$/i.test(t))) return true;
+    if (tokens.some((t) => /^(?:-c|-e|-m|-p|-r|--eval|--print)$/i.test(t))) return false;
+    return tokens.every((t) => /^-/.test(t));
+  }
+  return false;
+}
+
+/** Tools locais/MCP não têm contrato comum: extrai sinais seguros. */
+function normalizeOpaque(b, input) {
+  const leaves = stringLeaves(input);
+  const attempts = [];
+
+  for (const leaf of leaves) {
+    if (/^(command|commandline|cmd|script|shell_command)$/i.test(leaf.key)) {
+      attempts.push({ ...b, kind: 'shell', command: leaf.value });
+    }
+    // A documentação diz que write_stdin não dispara PreToolUse hoje.
+    // Se isso mudar, o texto enviado já cai na policy de comando.
+    if (/write_stdin/i.test(b.tool) && /^(chars|input)$/i.test(leaf.key)) {
+      attempts.push({ ...b, kind: 'shell', command: leaf.value });
+    }
+  }
+
+  const paths = leaves
+    .map((leaf) => leaf.value.trim())
+    .filter((value) => value && classifyPath(value).secret)
+    .map((value) => path.resolve(b.cwd, value));
+
+  attempts.push({ ...b, kind: 'opaque', paths: [...new Set(paths)], values: leaves.map((leaf) => leaf.value) });
+  return attempts;
+}
+
 /** @returns {object|object[]} uma tentativa, ou uma por arquivo do patch */
 function normalize(data) {
   const b = base(data);
   const ti = data.tool_input || {};
 
-  if (b.tool === 'Bash') return { ...b, kind: 'shell', command: ti.command || '' };
+  if (b.tool === 'Bash') {
+    const command = ti.command || '';
+    if (ti.tty === true || ti.interactive === true || ti.run_persistent === true || ti.RunPersistent === true || isInteractiveSession(command)) {
+      return { ...b, kind: 'interactive', command };
+    }
+    return { ...b, kind: 'shell', command };
+  }
 
   if (b.tool === 'apply_patch' || b.tool === 'Edit' || b.tool === 'Write') {
     const files = parsePatch(ti.command || ti.patch || '');
@@ -91,7 +179,7 @@ function normalize(data) {
     }));
   }
 
-  return { ...b, kind: 'other' };
+  return normalizeOpaque(b, ti);
 }
 
 function render(result) {
@@ -118,4 +206,4 @@ function renderPost(clean, unique) {
   });
 }
 
-module.exports = { normalize, render, normalizePost, renderPost, parsePatch };
+module.exports = { normalize, render, normalizePost, renderPost, parsePatch, isInteractiveSession, stringLeaves };

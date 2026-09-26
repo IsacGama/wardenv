@@ -6,7 +6,7 @@
 
 [![npm](https://img.shields.io/npm/v/wardenv?color=black)](https://www.npmjs.com/package/wardenv)
 [![license](https://img.shields.io/badge/license-MIT-black)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-101%20passing-black)](./test/wardenv.test.js)
+[![tests](https://img.shields.io/badge/tests-107%20passing-black)](./test/wardenv.test.js)
 [![deps](https://img.shields.io/badge/dependencies-0-black)](./package.json)
 
 <a href="https://www.buymeacoffee.com/natanaelisidoro"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=natanaelisidoro&button_colour=FF5F5F&font_colour=ffffff&font_family=Poppins&outline_colour=000000&coffee_colour=FFDD00" alt="Buy me a coffee" height="40"></a>
@@ -115,11 +115,12 @@ install <agent>` targets one directly: `claude`, `gemini`, `cursor`, `codex`, `c
 | Claude Code | `~/.claude/settings.json` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ verified end to end |
 | Gemini CLI | `~/.gemini/settings.json` | ✅ | ✅ | ✅ | ⚠️ deny-only (see below) | ✅ | ⚠️ unverified — checked against 0.34 source, not a live session |
 | Cursor | `~/.cursor/hooks.json` | ✅ | ✅ | ✅ | ❌ no hook for it | ✅ | ⚠️ unverified — checked against 3.4.20 source, not a live session |
-| Codex CLI | `~/.codex/hooks.json` | — no read tool¹ | ✅ | ✅ (`apply_patch`) | ⚠️ deny-only (see below) | ✅ | ⚠️ close to verified — a live 0.156.1 Desktop run blocked every case (see below), but the unlock happy path and subagents haven't been exercised yet |
+| Codex CLI | `~/.codex/hooks.json` | ✅ shell + local/MCP args¹ | ✅ | ✅ (`apply_patch`) | ⚠️ deny-and-replace for every local tool | ✅ | ⚠️ close to verified — a live 0.156.1 Desktop run blocked the original suite; current all-tool coverage is docs-tested, not live-tested |
 | GitHub Copilot CLI | `~/.copilot/hooks/wardenv.json` | ✅ | ✅ | ✅ | ⚠️ needs a newer release | ✅ | ⚠️ unverified — needs Copilot CLI newer than 1.0.11, and PowerShell 7 on Windows (see below) |
 
-¹ Codex has no dedicated file-read tool; files are read through the shell, which the
-Shell row already covers.
+¹ Codex has no dedicated built-in file-read tool. wardenv guards shell reads and
+conservatively blocks secret paths/values passed to MCPs or other local function tools.
+Hosted tools and specialized paths that opt out of Codex hooks remain outside this layer.
 
 "Verified" means run against a real session with a throwaway `.env`: read the file, `cat`
 it, `curl` it out, write the value into a tracked file, and try to disarm wardenv itself —
@@ -143,6 +144,16 @@ Two things worth knowing before you rely on any of the unverified adapters:
   arriving in 0.131. `wardenv install codex` checks your installed Codex's version and
   refuses outright below 0.129, instead of printing "installed" over a guard that can't
   fire; `wardenv uninstall codex` still removes any stale entry from an older install.
+- **Codex `write_stdin` does not run `PreToolUse` again.** wardenv therefore blocks
+  interactive shells, REPLs, explicit TTYs and persistent sessions at the original Bash
+  call, while leaving complete non-interactive commands alone. This closes the normal
+  command channel; arbitrary long-running programs that accept meaningful stdin remain an
+  inherent limitation of the current hook contract.
+- **Codex can disable user hooks in `config.toml`.** Installation now refuses when
+  `[features] hooks = false`, the deprecated `codex_hooks = false`, or
+  `allow_managed_hooks_only = true` would make `~/.codex/hooks.json` inert. The self-guard
+  also blocks an agent from introducing those settings while allowing unrelated config
+  changes such as model selection.
 - **Copilot CLI on Windows spawns hooks through `pwsh.exe`** (PowerShell 7), not the
   built-in `powershell.exe`. If it's missing, the installer refuses instead of registering
   a hook that silently never runs — install it with `winget install Microsoft.PowerShell`
@@ -341,6 +352,10 @@ which is why the table above still says "unverified" for everything but Claude C
 Redaction is not hermetic. It catches known values from your `.env` files and known secret
 shapes. A secret in an exotic format that never passed through a `.env` can slip through.
 The surface shrinks a lot; it doesn't reach zero.
+
+Codex hooks cover Bash, `apply_patch`, MCPs and most local function tools, but not hosted
+tools; the official contract also allows specialized tool paths to opt out. wardenv treats
+these hooks as a strong guardrail, not a complete sandbox boundary.
 
 It doesn't retroactively clean context from sessions that ran before install.
 

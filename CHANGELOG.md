@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Codex now hooks every supported local function tool instead of only Bash, `apply_patch`
+  and MCP output. Unknown MCP/local inputs are conservatively checked for shell commands,
+  secret-file paths and literal secret values; PostToolUse redaction covers every local
+  tool result.
+- Interactive shells, common REPLs, explicit TTYs and persistent exec sessions are denied
+  at their original `PreToolUse`, closing the documented `write_stdin` gap where later
+  input does not trigger another pre-tool hook. Complete non-interactive commands remain
+  available.
+- Codex installs the official `commandWindows` override and self-guard protects both
+  platform commands from mutation. Installation refuses `config.toml` states that disable
+  or ignore user hooks, and the self-guard prevents the agent from introducing them.
+  6 new adapter/installer regressions; 107 tests total.
+
 ## 0.2.0 — 2026-09-23
 
 Adds support for four more agents — Gemini CLI, Cursor, Codex CLI, GitHub Copilot CLI —

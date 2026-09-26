@@ -222,6 +222,9 @@ const SELF_DISARM = [
   // desarmar sem editar nada.
   /(^|\s)(rm|del|erase|mv|move|ren|rename|Remove-Item|Move-Item|Rename-Item)\b[^|;&]*[\\/]\.(claude|codex|gemini|cursor|copilot)[\\/][^|;&]*(settings(\.local)?|hooks)(\.json|[\\/]|\s|$)/i,
   /(>|>>|tee|Set-Content|Out-File)[^|;&]*[\\/]\.copilot[\\/]+hooks[\\/]/i,
+  // config.toml pode desligar todos os hooks ou aceitar apenas hooks managed.
+  // Pelo shell não há diff confiável: mudanças ficam para o humano.
+  /(>|>>|tee|Set-Content|Out-File)[^|;&]*(?:[\\/\s"'])\.codex[\\/]config\.toml/i,
 ];
 
 /** Testa desarme em cada segmento, para pegar `foo && wardenv unlock`. */

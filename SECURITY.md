@@ -61,6 +61,12 @@ can and can't do, and for the known gaps (Codex CLI before 0.129 has no tool hoo
 Copilot CLI on Windows needs PowerShell 7 to run hooks; Cursor and Gemini can't rewrite a
 tool's output, only deny it).
 
+**8. Codex `write_stdin`, hosted tools and specialized paths have runtime limits.**
+Codex does not fire `PreToolUse` again for input sent to an existing exec session. wardenv
+blocks interactive shells, common REPLs, explicit TTYs and persistent sessions before they
+open, but it cannot classify arbitrary stdin protocols for every long-running program.
+Hosted tools do not use the local hook path, and specialized tools may opt out of it.
+
 ## Reporting a vulnerability
 
 Open a GitHub issue for anything that is already public or low risk (a missed secret

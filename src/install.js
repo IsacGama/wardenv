@@ -12,6 +12,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { codexConfigProblem } = require('./lib/codex-config');
 
 const ROOT = path.resolve(__dirname, '..');
 const NODE = process.execPath;
@@ -26,6 +27,11 @@ function hookCmd(script, agent) {
 // caminho entre aspas no começo da linha é só uma string: precisa do `&`.
 function psSafe(cmd) {
   return WIN ? `& ${cmd}` : cmd;
+}
+
+function codexCommand(script) {
+  const command = hookCmd(script, 'codex');
+  return WIN ? { command: psSafe(command), commandWindows: psSafe(command) } : { command };
 }
 
 function home(envVar, ...rest) {
@@ -54,6 +60,25 @@ function versionAtLeast(bin, major, minor) {
   if (!m) return undefined;
   const [, a, b] = m.map(Number);
   return a !== major ? a > major : b >= minor;
+}
+
+function codexPrecheck() {
+  if (versionAtLeast('codex', 0, 129) === false) {
+    return 'Codex CLI tool hooks (PreToolUse/PostToolUse) need 0.129 or newer. Your version\n' +
+      '   has none at all, so wardenv would never be called and .env stays exposed.\n' +
+      '   Update with: npm install -g @openai/codex@latest';
+  }
+  const configs = [
+    home('CODEX_HOME', '.codex', 'config.toml'),
+    path.join(process.cwd(), '.codex', 'config.toml'),
+  ];
+  for (const config of new Set(configs.map((file) => path.resolve(file)))) {
+    try {
+      const problem = codexConfigProblem(fs.readFileSync(config, 'utf8'));
+      if (problem) return `${problem}. Fix ${config} before installing.`;
+    } catch {}
+  }
+  return null;
 }
 
 /**
@@ -123,8 +148,9 @@ const TARGETS = {
     file: home('CODEX_HOME', '.codex', 'hooks.json'),
     verified: false,
     layout: 'nested',
-    // Todo shell chega como "Bash", inclusive PowerShell no Windows. Escrita é
-    // apply_patch. Não existe tool de leitura: arquivo se lê pelo shell.
+    // Todo shell chega como "Bash", inclusive PowerShell no Windows. O Codex
+    // atual também dispara hooks para MCPs e outras tools locais: o adaptador
+    // faz inspeção conservadora dos argumentos que não têm contrato comum.
     //
     // O Codex Desktop roda o comando do hook via PowerShell. Sem o `&`, um
     // caminho entre aspas no início da linha ("C:\...\node.exe" "...") não é
@@ -133,8 +159,8 @@ const TARGETS = {
     // não produz JSON, e falha aberto: a leitura do .env passa sem bloqueio
     // nenhum, silenciosamente. Reproduzido e confirmado nesta máquina.
     events: {
-      PreToolUse: ['^(Bash|apply_patch)$', psSafe(hookCmd('pre-tool.js', 'codex'))],
-      PostToolUse: ['^(Bash|mcp__.*)$', psSafe(hookCmd('post-tool.js', 'codex'))],
+      PreToolUse: ['*', codexCommand('pre-tool.js')],
+      PostToolUse: ['*', codexCommand('post-tool.js')],
     },
     timeout: 5,
     // Tool hooks (PreToolUse/PostToolUse) só existem a partir do Codex 0.129;
@@ -142,14 +168,12 @@ const TARGETS = {
     // ou depois de uma tool. Instalar mesmo assim imprimia "🔒 installed" e
     // deixava o .env exposto — o instalador agora recusa de vez, como fazia
     // antes desta integração existir.
-    precheck: () =>
-      versionAtLeast('codex', 0, 129) === false
-        ? 'Codex CLI tool hooks (PreToolUse/PostToolUse) need 0.129 or newer. Your version\n' +
-          '   has none at all, so wardenv would never be called and .env stays exposed.\n' +
-          '   Update with: npm install -g @openai/codex@latest'
-        : null,
+    precheck: codexPrecheck,
     note:
-      'Checked against the Codex CLI source, not yet against a live session. Codex trusts\n' +
+      'Checked against the current official Codex hooks documentation. Every local tool\n' +
+      '   is matched; unknown MCP/local arguments are checked for secret paths and values.\n' +
+      '   Interactive sessions are denied because later write_stdin input skips PreToolUse.\n' +
+      '   Codex trusts\n' +
       '   a hook by a hash of its exact command, so it only runs after you review and\n' +
       '   approve it: open /hooks in Codex and approve the wardenv entries. Re-running\n' +
       '   this installer changes the command and invalidates that approval every time —\n' +
@@ -187,8 +211,8 @@ const TARGETS = {
 };
 
 function isWardenv(h) {
-  const cmd = [h?.command, h?.bash, h?.powershell].find((c) => typeof c === 'string');
-  return !!cmd && /wardenv[\\/](hooks|src)/i.test(cmd);
+  return [h?.command, h?.commandWindows, h?.bash, h?.powershell]
+    .some((cmd) => typeof cmd === 'string' && /wardenv[\\/](hooks|src)/i.test(cmd));
 }
 
 function ensure(hooks, event, matcher, command, timeout, extra) {
@@ -203,7 +227,7 @@ function ensure(hooks, event, matcher, command, timeout, extra) {
 
   hooks[event].unshift({
     matcher,
-    hooks: [{ ...(extra || {}), type: 'command', command, timeout }],
+    hooks: [{ ...(extra || {}), type: 'command', ...(typeof command === 'string' ? { command } : command), timeout }],
   });
 }
 

@@ -39,7 +39,7 @@ function envStructure(filePath) {
 
 /**
  * @param {object} n  tentativa normalizada
- * @param {'read'|'shell'|'write'|'other'} n.kind
+ * @param {'read'|'shell'|'write'|'interactive'|'opaque'|'other'} n.kind
  * @param {string} n.tool      nome da tool no agente, só para o log
  * @param {string} [n.path]    alvo, para 'read' e 'write'
  * @param {string} [n.command] linha de comando, para 'shell'
@@ -73,6 +73,16 @@ function decide(n) {
 
     log({ event: 'block-read', tool, path: fp, agent, cwd });
     return deny(`wardenv: "${base}" is a secret file — read blocked.`, ctx);
+  }
+
+  // ---- Sessão interativa --------------------------------------------
+  if (n.kind === 'interactive') {
+    log({ event: 'block-interactive', tool, command: n.command, agent, cwd });
+    return deny(
+      'wardenv: interactive command session blocked.',
+      'Codex write_stdin does not trigger PreToolUse again, so later input would bypass ' +
+        'secret-read and upload checks. Run a complete non-interactive command instead.'
+    );
   }
 
   // ---- Shell ----------------------------------------------------------
@@ -150,6 +160,33 @@ function decide(n) {
       );
     }
     return ALLOW;
+  }
+
+  // ---- Tool local/MCP sem contrato conhecido -------------------------
+  if (n.kind === 'opaque') {
+    const paths = Array.isArray(n.paths) ? n.paths : [];
+    if (paths.length) {
+      const fp = paths[0];
+      log({ event: 'block-tool', tool, path: fp, agent, cwd });
+      return deny(
+        `wardenv: ${tool} received a secret-file argument.`,
+        envStructure(fp) || 'Use a variable name or a safe template path instead of a secret file.'
+      );
+    }
+
+    const known = collectKnownSecrets(cwd);
+    const hits = new Set();
+    for (const value of Array.isArray(n.values) ? n.values : []) {
+      for (const hit of redactText(value, known).hits) hits.add(hit);
+    }
+    if (hits.size) {
+      const names = [...hits];
+      log({ event: 'block-tool', tool, hits: names, agent, cwd });
+      return deny(
+        `wardenv: ${tool} input contains a secret (${names.join(', ')}).`,
+        'Pass the variable name or a safe reference instead of the literal value.'
+      );
+    }
   }
 
   return ALLOW;
