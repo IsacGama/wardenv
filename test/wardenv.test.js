@@ -485,6 +485,19 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
   assert.equal(checkWrite({ filePath: settings, body: '{"hooks":{}}' }).block, true, 'Write sem o hook');
   assert.equal(checkWrite({ filePath: settings, edits: [{ old: '"theme"', new: '"disableAllHooks": true, "theme"' }] }).block, true, 'disableAllHooks');
   assert.equal(checkWrite({ filePath: settings, body: raw.slice(0, -5) }).block, true, 'JSON quebrado');
+
+  // Antigravity guarda o hook numa chave nomeada. `enabled: false` desarma
+  // sem apagar o comando e precisa ser detectado como alteração da assinatura.
+  const antigravity = pathMod.join(home, '.gemini', 'config', 'hooks.json');
+  fs.mkdirSync(pathMod.dirname(antigravity), { recursive: true });
+  const agCfg = { wardenv: { enabled: true, PreToolUse: [{ matcher: 'run_command', hooks: [{ command: `${cmd} --agent antigravity` }] }] } };
+  fs.writeFileSync(antigravity, JSON.stringify(agCfg, null, 2));
+  assert.equal(
+    checkWrite({ filePath: antigravity, edits: [{ old: '"enabled": true', new: '"enabled": false' }] }).block,
+    true,
+    'desabilitar hook nomeado do Antigravity'
+  );
+  assert.equal(checkWrite({ filePath: antigravity, body: '{"linter":{}}' }).block, true, 'remover hook nomeado do Antigravity');
 });
 
 test('atrito: editar a config do agente sem tocar no wardenv continua liberado', () => {

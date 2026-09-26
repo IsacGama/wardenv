@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Google Antigravity 2.0 adapter and installer target (`wardenv install antigravity`). It
+  guards `view_file`, `grep_search`, `run_command`, and all three file-write tools through
+  the official `PreToolUse` contract. The named hook entry is protected against both
+  removal and `enabled: false`; output redaction remains unavailable because Antigravity's
+  `PostToolUse` hook cannot rewrite tool results.
+- 8 Antigravity adapter, installer, and self-disarm regression cases; 109 tests total.
+
 ## 0.2.0 — 2026-09-23
 
 Adds support for four more agents — Gemini CLI, Cursor, Codex CLI, GitHub Copilot CLI —

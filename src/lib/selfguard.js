@@ -25,6 +25,7 @@ const AGENT_CONFIG_RE = new RegExp(
     /[\\/]\.claude[\\/]settings(\.local)?\.json$/,
     /[\\/]\.codex[\\/]hooks\.json$/,
     /[\\/]\.gemini[\\/]settings\.json$/,
+    /[\\/]\.gemini[\\/]config[\\/]hooks\.json$/,
     /[\\/]\.cursor[\\/]hooks\.json$/,
     /[\\/]\.copilot[\\/]hooks[\\/][^\\/]+\.json$/,
   ].map((r) => r.source).join('|'),
@@ -53,22 +54,33 @@ function wardenvHooks(text) {
     return null;
   }
   const out = new Set();
-  const hooks = (cfg && cfg.hooks) || {};
-  for (const [event, groups] of Object.entries(hooks)) {
-    if (!Array.isArray(groups)) continue;
-    for (const g of groups) {
-      // Aninhado ({matcher, hooks: [...]}) ou plano (Copilot, Cursor: a
-      // própria entrada é o hook, com o comando em command/bash/powershell).
-      const list = g && Array.isArray(g.hooks) ? g.hooks : g ? [g] : [];
-      for (const h of list) {
-        for (const cmd of [h.command, h.bash, h.powershell]) {
-          if (typeof cmd === 'string' && /wardenv[\\/]+hooks[\\/]+(pre|post)-tool\.js/i.test(cmd)) {
-            out.add(`${event}|${g.matcher}|${cmd}`);
+  function collect(hooks, prefix) {
+    for (const [event, groups] of Object.entries(hooks || {})) {
+      if (!Array.isArray(groups)) continue;
+      for (const g of groups) {
+        // Aninhado ({matcher, hooks: [...]}) ou plano (Copilot, Cursor: a
+        // própria entrada é o hook, com o comando em command/bash/powershell).
+        const list = g && Array.isArray(g.hooks) ? g.hooks : g ? [g] : [];
+        for (const h of list) {
+          for (const cmd of [h.command, h.bash, h.powershell]) {
+            if (typeof cmd === 'string' && /wardenv[\\/]+hooks[\\/]+(pre|post)-tool\.js/i.test(cmd)) {
+              out.add(`${prefix}|${event}|${g.matcher}|${cmd}`);
+            }
           }
         }
       }
     }
   }
+
+  collect((cfg && cfg.hooks) || {}, 'hooks');
+
+  // Antigravity guarda cada integração numa chave nomeada no topo. O
+  // estado enabled faz parte da assinatura: trocar true/ausente por false
+  // desarma o wardenv sem remover uma única linha de comando.
+  if (cfg && cfg.wardenv && typeof cfg.wardenv === 'object') {
+    collect(cfg.wardenv, `wardenv:${cfg.wardenv.enabled === false ? 'disabled' : 'enabled'}`);
+  }
+
   return out;
 }
 
