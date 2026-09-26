@@ -498,6 +498,17 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
     'desabilitar hook nomeado do Antigravity'
   );
   assert.equal(checkWrite({ filePath: antigravity, body: '{"linter":{}}' }).block, true, 'remover hook nomeado do Antigravity');
+
+  // O Antigravity/editores no Windows podem salvar JSON com UTF-8 BOM. O
+  // prefixo não pode transformar a config protegida numa config invisível.
+  const agRawBom = `\uFEFF${JSON.stringify(agCfg, null, 2)}`;
+  fs.writeFileSync(antigravity, agRawBom);
+  assert.equal(
+    checkWrite({ filePath: antigravity, edits: [{ old: '"enabled": true', new: '"enabled": false' }] }).block,
+    true,
+    'desabilitar hook nomeado com BOM'
+  );
+  assert.equal(checkWrite({ filePath: antigravity, body: '\uFEFF{"linter":{}}' }).block, true, 'remover hook nomeado com BOM');
 });
 
 test('atrito: editar a config do agente sem tocar no wardenv continua liberado', () => {

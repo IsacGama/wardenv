@@ -49,7 +49,7 @@ function inside(file, dir) {
 function wardenvHooks(text) {
   let cfg;
   try {
-    cfg = JSON.parse(text);
+    cfg = JSON.parse(String(text).replace(/^\uFEFF/, ''));
   } catch {
     return null;
   }

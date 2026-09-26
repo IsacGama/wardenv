@@ -9,7 +9,7 @@
   the official `PreToolUse` contract. The named hook entry is protected against both
   removal and `enabled: false`; output redaction remains unavailable because Antigravity's
   `PostToolUse` hook cannot rewrite tool results.
-- 8 Antigravity adapter, installer, and self-disarm regression cases; 109 tests total.
+- 10 Antigravity adapter, installer, and self-disarm regression cases; 111 tests total.
 
 ## 0.2.0 — 2026-09-23
 

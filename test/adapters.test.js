@@ -256,6 +256,75 @@ test('antigravity: grep_search dentro de .env é tratado como leitura', () => {
   });
   assert.ok(DENIED.antigravity(r));
   assert.match(r.reason, /SECRET_KEY=<set, 16 chars>/);
+  assert.doesNotMatch(r.reason, new RegExp(SECRET));
+
+  const included = run(PRE, 'antigravity', {
+    workspacePaths: [cwd],
+    toolCall: { name: 'grep_search', args: {
+      SearchPath: cwd,
+      Query: 'SECRET_KEY',
+      Includes: ['*.env'],
+    } },
+  });
+  assert.ok(DENIED.antigravity(included));
+  assert.doesNotMatch(included.reason, new RegExp(SECRET));
+});
+
+test('antigravity: grep_search na raiz é negado quando alcança uma linha do .env', () => {
+  const cwd = sandbox('antigravity-grep-root');
+  const r = run(PRE, 'antigravity', {
+    workspacePaths: [cwd],
+    toolCall: { name: 'grep_search', args: {
+      SearchPath: cwd,
+      Query: '^secret_key=',
+      IsRegex: true,
+      CaseInsensitive: true,
+    } },
+  });
+  assert.ok(DENIED.antigravity(r));
+  assert.match(r.reason, /SECRET_KEY=<set, 16 chars>/);
+  assert.doesNotMatch(r.reason, new RegExp(SECRET));
+});
+
+test('atrito (antigravity): grep_search na raiz passa quando não pode devolver o .env', () => {
+  const cwd = sandbox('antigravity-grep-root-ok');
+  fs.writeFileSync(path.join(cwd, 'app.js'), 'const visible = true;\n');
+
+  const noMatch = run(PRE, 'antigravity', {
+    workspacePaths: [cwd],
+    toolCall: { name: 'grep_search', args: { SearchPath: cwd, Query: 'visible' } },
+  });
+  assert.deepStrictEqual(noMatch, { decision: 'allow' });
+
+  const excludedByInclude = run(PRE, 'antigravity', {
+    workspacePaths: [cwd],
+    toolCall: { name: 'grep_search', args: {
+      SearchPath: cwd,
+      Query: 'SECRET_KEY',
+      Includes: ['*.js'],
+    } },
+  });
+  assert.deepStrictEqual(excludedByInclude, { decision: 'allow' });
+
+  const excludedByNegativeGlob = run(PRE, 'antigravity', {
+    workspacePaths: [cwd],
+    toolCall: { name: 'grep_search', args: {
+      SearchPath: cwd,
+      Query: 'SECRET_KEY',
+      Includes: ['!**/.env'],
+    } },
+  });
+  assert.deepStrictEqual(excludedByNegativeGlob, { decision: 'allow' });
+
+  const filenamesOnly = run(PRE, 'antigravity', {
+    workspacePaths: [cwd],
+    toolCall: { name: 'grep_search', args: {
+      SearchPath: cwd,
+      Query: 'SECRET_KEY',
+      MatchPerLine: false,
+    } },
+  });
+  assert.deepStrictEqual(filenamesOnly, { decision: 'allow' });
 });
 
 test('antigravity: as duas tools de edição bloqueiam segredo novo', () => {
