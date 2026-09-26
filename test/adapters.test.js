@@ -218,7 +218,11 @@ test('codex: comando dentro de MCP passa pela mesma policy de shell', () => {
 
 test('codex: sessão interativa é negada porque write_stdin não refaz PreToolUse', () => {
   const cwd = sandbox('codex-interactive');
-  for (const command of ['bash', 'pwsh -NoProfile', 'pwsh -Command -', 'pwsh -File -', 'cmd.exe /k echo ready', 'python -i', 'deno repl', 'irb script.rb']) {
+  for (const command of [
+    'bash', 'bash -v', 'bash -h', 'sh -v',
+    'pwsh -NoProfile', 'pwsh -Version 7.4', 'pwsh -v 7.4', 'pwsh -Command -', 'pwsh -File -',
+    'cmd.exe /k echo ready', 'python -i', 'deno repl', 'irb script.rb',
+  ]) {
     const r = run(PRE, 'codex', CASES.codex.shell(cwd, command));
     assert.ok(DENIED.codex(r), `deveria negar sessão interativa: ${command}`);
     assert.match(JSON.stringify(r), /write_stdin/);
@@ -240,7 +244,7 @@ test('atrito (codex): comandos locais opacos e executores não interativos passa
   });
   assert.strictEqual(plan, null);
 
-  for (const command of ['bash -c "npm test"', 'node --test', 'python script.py', 'pwsh -File build.ps1']) {
+  for (const command of ['bash -c "npm test"', 'bash --version', 'node -v', 'node --test', 'python script.py', 'pwsh -File build.ps1']) {
     assert.strictEqual(run(PRE, 'codex', CASES.codex.shell(cwd, command)), null, command);
   }
 });

@@ -13,6 +13,7 @@
 //                     a saída, e não bloqueados na entrada (bloquear `printenv`
 //                     inteiro seria insuportável no dia a dia).
 
+const path = require('path');
 const { classifyPath } = require('./targets');
 
 // Comandos cujo propósito é despejar conteúdo de arquivo.
@@ -227,10 +228,22 @@ const SELF_DISARM = [
   /(>|>>|tee|Set-Content|Out-File)[^|;&]*(?:[\\/\s"'])\.codex[\\/]config\.toml/i,
 ];
 
+const CONFIG_WRITER_RE = /(>|>>|tee|Set-Content|Out-File)/i;
+const CODEX_HOME_TOKEN_RE = /(?:\$\{?CODEX_HOME\}?|\$env:CODEX_HOME|\$\{env:CODEX_HOME\}|%CODEX_HOME%)[\\/]config\.toml/i;
+
+function writesCodexConfig(seg) {
+  if (!CONFIG_WRITER_RE.test(seg)) return false;
+  if (CODEX_HOME_TOKEN_RE.test(seg)) return true;
+  if (!process.env.CODEX_HOME) return false;
+  const command = String(seg).replace(/\\/g, '/').toLowerCase();
+  const target = path.join(process.env.CODEX_HOME, 'config.toml').replace(/\\/g, '/').toLowerCase();
+  return command.includes(target);
+}
+
 /** Testa desarme em cada segmento, para pegar `foo && wardenv unlock`. */
 function isSelfDisarm(raw) {
   const segments = String(raw).split(/&&|\|\||[;|]/).map((s) => s.trim()).filter(Boolean);
-  return segments.some((seg) => SELF_DISARM.some((re) => re.test(seg)));
+  return segments.some((seg) => writesCodexConfig(seg) || SELF_DISARM.some((re) => re.test(seg)));
 }
 
 /**

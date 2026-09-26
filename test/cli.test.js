@@ -196,8 +196,11 @@ test('install: Codex sem hooks de ferramenta (< 0.129) recusa a instalação em 
 test('install: Codex recusa quando config.toml desliga ou ignora hooks de usuário', () => {
   for (const [name, config, expected] of [
     ['disabled', '\uFEFF[features]\nhooks = false\n', /disables Codex hooks/i],
+    ['quoted', '["features"]\n"hooks" = false\n', /disables Codex hooks/i],
+    ['spaced-dotted', 'features . hooks = false\n', /disables Codex hooks/i],
     ['legacy-disabled', '[features]\ncodex_hooks = false\n', /disables Codex hooks/i],
     ['managed-only', 'allow_managed_hooks_only = true\n', /managed Codex hooks/i],
+    ['quoted-managed', '"allow_managed_hooks_only" = true\n', /managed Codex hooks/i],
   ]) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), `wardenv-install-codex-${name}-`));
     const codexDir = path.join(home, '.codex');

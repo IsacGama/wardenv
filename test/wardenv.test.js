@@ -428,12 +428,28 @@ test('auto-desarme: desvios da forma direta também são bloqueados', () => {
     'echo "[features] hooks = false" > ~/.codex/config.toml',
     'echo "[features] hooks = false" > ".codex/config.toml"',
     'Set-Content ~/.codex/config.toml "allow_managed_hooks_only = true"',
+    'printf "[features] hooks = false" > "$CODEX_HOME/config.toml"',
+    '"[features] hooks = false" | Set-Content "$env:CODEX_HOME\\config.toml"',
+    'echo [features] hooks = false > "%CODEX_HOME%\\config.toml"',
     // Forjar o TTY e chamar a CLI por dentro de um one-liner.
     ['echo ', E, ' | node -e "process.stdin.isTTY=true;process.stdout.isTTY=true;',
       'process.argv.push(\'unlock\',\'', E, '\');require(\'C:/npm/', W, '/src/cli.js\')"'].join(''),
   ];
   for (const c of cases) {
     assert.equal(analyzeCommand(c).action, 'block', `deveria bloquear: ${c}`);
+  }
+
+  const previousCodexHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = 'C:\\custom-codex';
+    assert.equal(
+      analyzeCommand('echo hooks = false > "C:\\custom-codex\\config.toml"').action,
+      'block',
+      'caminho expandido de CODEX_HOME deveria bloquear'
+    );
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
   }
 });
 
@@ -445,6 +461,7 @@ test('atrito: usar o wardenv sem desarmar continua liberado', () => {
     ['& ', W, ' check "npm run build"'].join(''),
     ['node C:/dev/', W, '/src/cli.js status'].join(''),
     ['git commit -m "docs: explain ', W, ' install"'].join(''),
+    'echo "$CODEX_HOME/config.toml"',
   ];
   for (const c of ok) {
     assert.equal(analyzeCommand(c).action, 'allow', `falso positivo: ${c}`);
@@ -518,6 +535,18 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
     checkWrite({ filePath: codexToml, body: `allow_managed_hooks_only = true\n${toml}` }).block,
     true,
     'ignorar hooks de usuário no config.toml'
+  );
+  fs.writeFileSync(codexToml, '["features"]\n"hooks" = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, body: '["features"]\n"hooks" = false\n' }).block,
+    true,
+    'chave TOML quoted não pode desligar hooks'
+  );
+  fs.writeFileSync(codexToml, 'features . hooks = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'true', new: 'false' }] }).block,
+    true,
+    'chave TOML dotted com espaços não pode desligar hooks'
   );
 
   const previousCodexHome = process.env.CODEX_HOME;

@@ -102,9 +102,11 @@ function isInteractiveSession(command) {
   if (!raw) return false;
   const { bin, args } = commandHead(raw);
   const tokens = args ? args.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [] : [];
-  if (tokens.some((t) => /^(?:-h|--help|-v|--version|\/\?)$/i.test(t))) return false;
 
   if (['bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'pwsh', 'powershell'].includes(bin)) {
+    // -v/-h são modos de shell em Bash/sh, não consultas de versão/ajuda.
+    if (tokens.some((t) => /^(?:--help|--version)$/i.test(t))) return false;
+    if ((bin === 'pwsh' || bin === 'powershell') && tokens.some((t) => /^-(?:v|version)$/i.test(t))) return true;
     if (tokens.some((t) => /^(?:-i|--interactive|-noexit)$/i.test(t))) return true;
     const commandAt = tokens.findIndex((t) => /^(?:-c|--command|-command|-file)$/i.test(t));
     if (commandAt >= 0) {
@@ -114,12 +116,14 @@ function isInteractiveSession(command) {
     return tokens.every((t) => /^[-/]/.test(t));
   }
   if (bin === 'cmd') {
+    if (tokens.some((t) => /^\/\?$/i.test(t))) return false;
     return !tokens.some((t) => /^\/[c]$/i.test(t));
   }
   if (['deno', 'bun'].includes(bin) && /^repl$/i.test(tokens[0] || '')) return true;
   if (bin === 'node' && tokens.some((t) => /^(?:--test|--check)$/i.test(t))) return false;
   if (bin === 'irb') return true;
   if (['node', 'deno', 'bun', 'python', 'python3', 'ruby', 'php'].includes(bin)) {
+    if (tokens.some((t) => /^(?:-h|--help|-v|--version)$/i.test(t))) return false;
     if (tokens.some((t) => /^(?:-i|--interactive)$/i.test(t))) return true;
     if (bin === 'php' && tokens.some((t) => /^-a$/i.test(t))) return true;
     if (tokens.some((t) => /^(?:-c|-e|-m|-p|-r|--eval|--print)$/i.test(t))) return false;
