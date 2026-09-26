@@ -107,19 +107,43 @@ function stripQuotes(tok) {
 const COMMAND_WRAPPERS = ['rtk', 'sudo', 'doas'];
 
 const WRAPPER_OPTIONS_WITH_VALUE = {
-  sudo: new Set([
-    '-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt',
-    '-C', '--close-from', '-T', '--command-timeout', '-R', '--chroot',
-    '-D', '--chdir', '--role', '--type', '--other-user',
-  ]),
-  doas: new Set(['-u', '-C']),
+  // Inclui opções condicionais de BSD/SELinux. Em uma plataforma que não as
+  // suporta, o wrapper falharia antes de executar qualquer comando; reconhecê-
+  // las aqui ainda é a escolha segura e mantém o parser portátil.
+  sudo: {
+    short: new Set(['a', 'C', 'c', 'D', 'g', 'h', 'p', 'R', 'r', 't', 'T', 'U', 'u']),
+    long: new Set([
+      '--auth-type', '--close-from', '--login-class', '--chdir', '--group',
+      '--host', '--prompt', '--chroot', '--role', '--type',
+      '--command-timeout', '--other-user', '--user',
+    ]),
+  },
+  doas: {
+    short: new Set(['a', 'C', 'u']),
+    long: new Set(),
+  },
 };
 
 function optionTakesSeparateValue(wrapper, option) {
-  if (option.includes('=')) return false;
-  if (/^-(?:u|g|h|p|C|T|R|D).+/.test(option)) return false; // valor colado: `-uroot`
   const known = WRAPPER_OPTIONS_WITH_VALUE[wrapper];
-  return known?.has(option) || (option.startsWith('--') && known?.has(option.toLowerCase())) || false;
+  if (!known || option === '-' || option === '--') return false;
+
+  if (option.startsWith('--')) {
+    // Opção longa aceita `--role valor` e `--role=valor`. Só a primeira forma
+    // precisa consumir o token seguinte.
+    if (option.includes('=')) return false;
+    return known.long.has(option.toLowerCase());
+  }
+
+  if (!option.startsWith('-')) return false;
+  const cluster = option.slice(1);
+  for (let i = 0; i < cluster.length; i++) {
+    if (!known.short.has(cluster[i])) continue;
+    // Em `-Hr role`, H é booleana e r consome o próximo token. Em
+    // `-Hrsysadm_r`, tudo após r já é o valor colado.
+    return i === cluster.length - 1;
+  }
+  return false;
 }
 
 /** Quantos tokens iniciais pertencem apenas a wrappers transparentes. */
@@ -139,7 +163,12 @@ function wrapperPrefixLength(tokens) {
       i++;
       while (tokens[i] && tokens[i].startsWith('-')) {
         const option = tokens[i++];
+        if (option === '--') break;
         if (optionTakesSeparateValue(bin, option) && tokens[i]) i++;
+      }
+      // sudo aceita atribuições de ambiente entre suas opções e o comando.
+      if (bin === 'sudo') {
+        while (tokens[i] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
       }
       continue;
     }
@@ -306,6 +335,18 @@ function nestedShellCommands(command) {
     const shell = baseCommand(words[commandIndex]?.value);
     let flagIndex = -1;
 
+    // sudo/doas/rtk/env são executores transparentes: reanalisar o trecho a
+    // partir do binário real preserva valores citados de opções (`-p "..."`)
+    // que stripLiterals remove da visão usada pela análise direta.
+    if (commandIndex > 0 && words[commandIndex]) {
+      nested.push({
+        shell: baseCommand(words[0].value),
+        command: segment.slice(words[commandIndex].start).trim(),
+        transparent: true,
+      });
+      continue;
+    }
+
     if (['bash', 'sh', 'zsh'].includes(shell)) {
       for (let i = commandIndex + 1; i < words.length; i++) {
         const option = words[i].value;
@@ -470,7 +511,10 @@ function analyzeCommand(cmd, depth = 0) {
     for (const nested of nestedShellCommands(raw)) {
       const verdict = analyzeCommand(nested.command, depth + 1);
       if (verdict.action === 'block') {
-        return { ...verdict, reason: `${nested.shell} executes: ${verdict.reason}` };
+        return {
+          ...verdict,
+          reason: nested.transparent ? verdict.reason : `${nested.shell} executes: ${verdict.reason}`,
+        };
       }
       if (verdict.action === 'redact') nestedRedact = nestedRedact || verdict;
     }

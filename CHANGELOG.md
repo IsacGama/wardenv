@@ -10,7 +10,7 @@
   redaction had any chance to help. wardenv now unwraps Bash, sh, zsh, cmd, PowerShell and
   pwsh recursively, including transparent `rtk proxy`, sudo/doas options, and mixed nested
   shells. Quoted documentation and ordinary nested commands remain allowed.
-- 3 paired leak/friction regression tests; 104 tests total.
+- 5 paired leak/friction regression tests; 106 tests total.
 
 ## 0.2.0 — 2026-09-23
 
