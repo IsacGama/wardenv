@@ -236,7 +236,7 @@ test('atrito (codex): comandos locais opacos e executores não interativos passa
   const plan = run(PRE, 'codex', {
     tool_name: 'update_plan',
     cwd,
-    tool_input: { explanation: 'Document .env handling without reading it', plan: [] },
+    tool_input: { explanation: 'Document .env handling without reading it', plan: ['.env'] },
   });
   assert.strictEqual(plan, null);
 

@@ -132,6 +132,7 @@ function isInteractiveSession(command) {
 function normalizeOpaque(b, input) {
   const leaves = stringLeaves(input);
   const attempts = [];
+  const pathTool = /(?:file|read|upload|attach|send|copy|move|resource)/i.test(b.tool);
 
   for (const leaf of leaves) {
     if (/^(command|commandline|cmd|script|shell_command)$/i.test(leaf.key)) {
@@ -145,6 +146,7 @@ function normalizeOpaque(b, input) {
   }
 
   const paths = leaves
+    .filter((leaf) => pathTool || /(?:path|file|filename|source|src|target|input|upload|attachment|resource|uri)/i.test(leaf.key))
     .map((leaf) => leaf.value.trim())
     .filter((value) => value && classifyPath(value).secret)
     .map((value) => path.resolve(b.cwd, value));
