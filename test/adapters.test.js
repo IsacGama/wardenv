@@ -244,6 +244,20 @@ test('atrito (codex): comandos locais opacos e executores não interativos passa
   });
   assert.strictEqual(plan, null);
 
+  const slack = run(PRE, 'codex', {
+    tool_name: 'mcp__slack__send_message',
+    cwd,
+    tool_input: { text: 'added FOO to config/.env' },
+  });
+  assert.strictEqual(slack, null);
+
+  const github = run(PRE, 'codex', {
+    tool_name: 'mcp__github__create_or_update_file',
+    cwd,
+    tool_input: { path: 'README.md', content: '.env' },
+  });
+  assert.strictEqual(github, null);
+
   for (const command of ['bash -c "npm test"', 'bash --version', 'node -v', 'node --test', 'python script.py', 'pwsh -File build.ps1']) {
     assert.strictEqual(run(PRE, 'codex', CASES.codex.shell(cwd, command)), null, command);
   }

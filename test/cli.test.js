@@ -198,9 +198,11 @@ test('install: Codex recusa quando config.toml desliga ou ignora hooks de usuár
     ['disabled', '\uFEFF[features]\nhooks = false\n', /disables Codex hooks/i],
     ['quoted', '["features"]\n"hooks" = false\n', /disables Codex hooks/i],
     ['spaced-dotted', 'features . hooks = false\n', /disables Codex hooks/i],
+    ['inline', 'features = { hooks = false }\n', /disables Codex hooks/i],
     ['legacy-disabled', '[features]\ncodex_hooks = false\n', /disables Codex hooks/i],
     ['managed-only', 'allow_managed_hooks_only = true\n', /managed Codex hooks/i],
     ['quoted-managed', '"allow_managed_hooks_only" = true\n', /managed Codex hooks/i],
+    ['profile', 'profile = "locked"\n[profiles.locked.features]\nhooks = false\n', /profile locked disables hooks/i],
   ]) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), `wardenv-install-codex-${name}-`));
     const codexDir = path.join(home, '.codex');
@@ -222,7 +224,11 @@ test('install: Codex recusa quando config.toml desliga ou ignora hooks de usuár
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-install-codex-enabled-'));
   const codexDir = path.join(home, '.codex');
   fs.mkdirSync(codexDir);
-  fs.writeFileSync(path.join(codexDir, 'config.toml'), '[features]\nhooks = true # hooks = false is documentation only\n');
+  fs.writeFileSync(
+    path.join(codexDir, 'config.toml'),
+    '[features]\nhooks = true # hooks = false is documentation only\nHooks = false\n' +
+      'note = """\nfeatures.hooks = false\n"""\n'
+  );
   const env = { ...fakeExecutableOnPath(home, 'codex', '0.156.0'), CODEX_HOME: codexDir };
   const allowed = spawnSync(process.execPath, ['-e', [
     `require('os').homedir = () => ${JSON.stringify(home)};`,

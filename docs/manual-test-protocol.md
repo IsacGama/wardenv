@@ -113,10 +113,11 @@ below) is `—`, not a fail.
 - Ask an MCP/local tool to receive `.env` as a path and, separately, the literal fake
   token as an argument. Both must be denied before the tool runs. A harmless `update_plan`
   mentioning `.env` in prose must still pass.
-- Try to open `bash`, `pwsh -NoProfile`, a language REPL, and an explicit TTY/persistent
-  command. wardenv must deny them because later `write_stdin` input does not run
-  `PreToolUse` again. Complete one-shot commands such as `bash -c "npm test"`,
-  `node --test`, and `pwsh -File build.ps1` must pass.
+- Try to open `bash`, `pwsh -NoProfile`, and a language REPL directly. wardenv must deny
+  them because later `write_stdin` input does not run `PreToolUse` again. If the live
+  payload exposes TTY/persistent fields, confirm those are denied too and record the
+  fields/version. Complete one-shot commands such as `bash -c "npm test"`, `node --test`,
+  and `pwsh -File build.ps1` must pass.
 - Confirm both hook groups use matcher `*`; on Windows confirm each handler has the
   official `commandWindows` field and that editing either registered command is blocked.
 - Temporarily set `[features] hooks = false` in a throwaway `$CODEX_HOME/config.toml` and

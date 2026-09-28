@@ -548,6 +548,18 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
     true,
     'chave TOML dotted com espaços não pode desligar hooks'
   );
+  fs.writeFileSync(codexToml, 'features = { hooks = true }\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, body: 'features = { hooks = false }\n' }).block,
+    true,
+    'inline table não pode desligar hooks'
+  );
+  fs.writeFileSync(codexToml, 'profile = "locked"\n[profiles.locked.features]\nhooks = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'hooks = true', new: 'hooks = false' }] }).block,
+    true,
+    'perfil ativo não pode desligar hooks'
+  );
 
   const previousCodexHome = process.env.CODEX_HOME;
   const customCodexHome = pathMod.join(home, 'custom-codex-home');
@@ -596,6 +608,9 @@ test('atrito: editar a config do agente sem tocar no wardenv continua liberado',
     false,
     'trocar modelo não desarma hooks'
   );
+  const harmlessToml = '[features]\nhooks = true\nHooks = false\n' +
+    'note = """\nfeatures.hooks = false\n"""\n';
+  assert.equal(checkWrite({ filePath: codexToml, body: harmlessToml }).block, false, 'TOML case-sensitive e multiline');
 });
 
 // ------------------------------------------------------ wrappers transparentes

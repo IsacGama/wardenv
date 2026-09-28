@@ -150,7 +150,11 @@ function normalizeOpaque(b, input) {
   }
 
   const paths = leaves
-    .filter((leaf) => pathTool || /(?:path|file|filename|source|src|target|input|upload|attachment|resource|uri)/i.test(leaf.key))
+    .filter((leaf) => {
+      const pathKey = /(?:path|file|filename|source|src|target|input|upload|attachment|resource|uri)/i.test(leaf.key);
+      const plainToolArgument = pathTool && !leaf.key && !/\s/.test(leaf.value.trim());
+      return pathKey || plainToolArgument;
+    })
     .map((leaf) => leaf.value.trim())
     .filter((value) => value && classifyPath(value).secret)
     .map((value) => path.resolve(b.cwd, value));

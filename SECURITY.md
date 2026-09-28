@@ -63,8 +63,9 @@ tool's output, only deny it).
 
 **8. Codex `write_stdin`, hosted tools and specialized paths have runtime limits.**
 Codex does not fire `PreToolUse` again for input sent to an existing exec session. wardenv
-blocks interactive shells, common REPLs, explicit TTYs and persistent sessions before they
-open, but it cannot classify arbitrary stdin protocols for every long-running program.
+blocks direct recognized shell/REPL launches and explicit session fields when present, but
+the official payload only guarantees the command string; wrappers and arbitrary stdin
+protocols for long-running programs cannot be classified completely.
 Hosted tools do not use the local hook path, and specialized tools may opt out of it.
 
 ## Reporting a vulnerability

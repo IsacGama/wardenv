@@ -145,9 +145,10 @@ Two things worth knowing before you rely on any of the unverified adapters:
   refuses outright below 0.129, instead of printing "installed" over a guard that can't
   fire; `wardenv uninstall codex` still removes any stale entry from an older install.
 - **Codex `write_stdin` does not run `PreToolUse` again.** wardenv therefore blocks
-  interactive shells, REPLs, explicit TTYs and persistent sessions at the original Bash
-  call, while leaving complete non-interactive commands alone. This closes the normal
-  command channel; arbitrary long-running programs that accept meaningful stdin remain an
+  direct launches of recognized shells/REPLs at the original Bash call and honors explicit
+  TTY/persistent fields when Codex supplies them, while leaving complete non-interactive
+  commands alone. The official payload only guarantees `tool_input.command`, so wrapped
+  interpreters and arbitrary long-running programs that accept meaningful stdin remain an
   inherent limitation of the current hook contract.
 - **Codex can disable user hooks in `config.toml`.** Installation now refuses when
   `[features] hooks = false`, the deprecated `codex_hooks = false`, or

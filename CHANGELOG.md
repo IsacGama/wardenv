@@ -8,10 +8,10 @@
   and MCP output. Unknown MCP/local inputs are conservatively checked for shell commands,
   secret-file paths and literal secret values; PostToolUse redaction covers every local
   tool result.
-- Interactive shells, common REPLs, explicit TTYs and persistent exec sessions are denied
-  at their original `PreToolUse`, closing the documented `write_stdin` gap where later
-  input does not trigger another pre-tool hook. Complete non-interactive commands remain
-  available.
+- Direct launches of recognized interactive shells/REPLs are denied at their original
+  `PreToolUse`; explicit TTY/persistent fields are honored when present. This narrows the
+  documented `write_stdin` gap while keeping the limits of the command-only official
+  payload explicit. Complete non-interactive commands remain available.
 - Codex installs the official `commandWindows` override and self-guard protects both
   platform commands from mutation. Installation refuses `config.toml` states that disable
   or ignore user hooks, and the self-guard prevents the agent from introducing them.
