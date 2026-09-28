@@ -233,20 +233,25 @@ function splitCommandSegments(command) {
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      continue; // backslash é literal dentro de aspas simples POSIX
+    }
     if (escaped) {
       escaped = false;
       continue;
     }
-    if (ch === '\\' || ch === '`') {
-      escaped = true;
-      continue;
-    }
-    if (quote) {
-      if (ch === quote) quote = null;
+    if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === '\\' || ch === '`') escaped = true;
       continue;
     }
     if (ch === '"' || ch === "'") {
       quote = ch;
+      continue;
+    }
+    if (ch === '\\' || ch === '`') {
+      escaped = true;
       continue;
     }
     if (ch === ';' || ch === '|' || ch === '&') {
@@ -288,7 +293,9 @@ function lexWords(command) {
     if (quote) {
       if (ch === quote) {
         quote = null;
-      } else if ((ch === '\\' || ch === '`') && text[i + 1] === quote) {
+      } else if (quote === '"' && ch === '\\' && /["\\$`]/.test(text[i + 1] || '')) {
+        value += text[++i];
+      } else if (quote === '"' && ch === '`' && text[i + 1]) {
         value += text[++i];
       } else {
         value += ch;
@@ -373,6 +380,34 @@ function nestedShellCommands(command) {
     }
   }
   return nested;
+}
+
+const MAX_NESTED_SHELL_DEPTH = 6;
+
+/** Upload tem prioridade global: um unlock nunca pode autorizar exfiltração. */
+function findNestedUpload(command, depth = 0) {
+  const raw = String(command || '');
+  for (const seg of splitCommandSegments(raw)) {
+    const bin = baseCommand(tokenize(seg)[0]);
+    if (!UPLOADERS.includes(bin)) continue;
+    const src = findUploadSource(seg);
+    if (src) return { action: 'block', reason: `${bin} uploads ${src}`, token: src, upload: true };
+  }
+
+  const nestedCommands = nestedShellCommands(raw);
+  if (depth >= MAX_NESTED_SHELL_DEPTH && nestedCommands.length) {
+    return { action: 'block', reason: 'nested shell depth limit exceeded' };
+  }
+  for (const nested of nestedCommands) {
+    const verdict = findNestedUpload(nested.command, depth + 1);
+    if (verdict) {
+      return {
+        ...verdict,
+        reason: nested.transparent ? verdict.reason : `${nested.shell} executes: ${verdict.reason}`,
+      };
+    }
+  }
+  return null;
 }
 
 /**
@@ -502,13 +537,20 @@ function analyzeCommand(cmd, depth = 0) {
     return { action: 'block', reason: 'attempt to disarm wardenv' };
   }
 
+  const upload = findNestedUpload(raw);
+  if (upload) return upload;
+
   // Um shell não muda o risco do comando que executa. Desembrulhar antes de
   // apagar literais fecha `bash -c 'cat .env'`, `cmd /c type .env` e seus
   // equivalentes PowerShell, inclusive quando encadeados. O limite impede que
   // entrada adversarial force recursão sem fim sem reduzir o uso normal.
   let nestedRedact = null;
-  if (depth < 6) {
-    for (const nested of nestedShellCommands(raw)) {
+  const nestedCommands = nestedShellCommands(raw);
+  if (depth >= MAX_NESTED_SHELL_DEPTH && nestedCommands.length) {
+    return { action: 'block', reason: 'nested shell depth limit exceeded' };
+  }
+  if (depth < MAX_NESTED_SHELL_DEPTH) {
+    for (const nested of nestedCommands) {
       const verdict = analyzeCommand(nested.command, depth + 1);
       if (verdict.action === 'block') {
         return {
@@ -524,19 +566,6 @@ function analyzeCommand(cmd, depth = 0) {
   // precisa ser procurado no texto CRU, antes de `stripLiterals`. Cada segmento
   // é testado separadamente para não confundir `node -e "..."` com um `cat .env`
   // que venha depois de um `&&`.
-  // Envio de segredo pela rede. Também no texto cru: `-F "f=@.env"` entre aspas
-  // seria apagado por stripLiterals.
-  for (const seg of splitCommandSegments(raw)) {
-    const bin = baseCommand(tokenize(seg)[0]);
-    if (!UPLOADERS.includes(bin)) continue;
-    const src = findUploadSource(seg);
-    if (src) {
-      // O unlock é para o agente LER o valor, não para despachar o arquivo
-      // para fora. Um grant ativo não libera este bloqueio.
-      return { action: 'block', reason: `${bin} uploads ${src}`, token: src, upload: true };
-    }
-  }
-
   for (const seg of splitCommandSegments(raw)) {
     if (!INLINE_SCRIPT.test(seg) || !SCRIPT_READ.test(seg)) continue;
     const found = findSecretPathToken(seg.replace(/["']/g, ' '));
@@ -548,7 +577,7 @@ function analyzeCommand(cmd, depth = 0) {
   // Uma linha pode encadear vários comandos: `echo oi && cat .env`. Avaliar
   // só o primeiro binário deixaria passar tudo que viesse depois de um `&&`,
   // `;` ou `|` — cada segmento precisa do próprio veredito.
-  const segments = text.split(/&&|\|\||[;|]/).map((s) => s.trim()).filter(Boolean);
+  const segments = splitCommandSegments(text);
   let mention = null;
 
   for (const seg of segments) {
