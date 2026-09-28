@@ -485,6 +485,7 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
   assert.equal(checkWrite({ filePath: settings, body: '{"hooks":{}}' }).block, true, 'Write sem o hook');
   assert.equal(checkWrite({ filePath: settings, edits: [{ old: '"theme"', new: '"disableAllHooks": true, "theme"' }] }).block, true, 'disableAllHooks');
   assert.equal(checkWrite({ filePath: settings, body: raw.slice(0, -5) }).block, true, 'JSON quebrado');
+  assert.equal(checkWrite({ filePath: settings, body: `\uFEFF${raw}` }).block, true, 'BOM novo quebra config do Claude');
 
   // Antigravity guarda o hook numa chave nomeada. `enabled: false` desarma
   // sem apagar o comando e precisa ser detectado como alteração da assinatura.
@@ -508,7 +509,22 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
     true,
     'desabilitar hook nomeado com BOM'
   );
+  for (const value of ['0', 'null', '"false"']) {
+    assert.equal(
+      checkWrite({ filePath: antigravity, edits: [{ old: '"enabled": true', new: `"enabled": ${value}` }] }).block,
+      true,
+      `enabled=${value} não pode alterar a assinatura`
+    );
+  }
   assert.equal(checkWrite({ filePath: antigravity, body: '\uFEFF{"linter":{}}' }).block, true, 'remover hook nomeado com BOM');
+
+  const workspaceHooks = pathMod.join(home, 'project', '.agents', 'hooks.json');
+  fs.mkdirSync(pathMod.dirname(workspaceHooks), { recursive: true });
+  assert.equal(
+    checkWrite({ filePath: workspaceHooks, body: JSON.stringify({ wardenv: { enabled: false } }) }).block,
+    true,
+    'hook local não pode sombrear o wardenv global'
+  );
 });
 
 test('atrito: editar a config do agente sem tocar no wardenv continua liberado', () => {
@@ -531,6 +547,8 @@ test('atrito: editar a config do agente sem tocar no wardenv continua liberado',
   // Config que ainda não tem o wardenv: nada a proteger.
   const other = pathMod.join(fs.mkdtempSync(pathMod.join(os.tmpdir(), 'wardenv-cfg-none-')), '.claude', 'settings.json');
   assert.equal(checkWrite({ filePath: other, body: '{"hooks":{}}' }).block, false);
+  const workspace = pathMod.join(home, 'project', '.agents', 'hooks.json');
+  assert.equal(checkWrite({ filePath: workspace, body: '{"linter":{}}' }).block, false);
 });
 
 // ------------------------------------------------------ wrappers transparentes

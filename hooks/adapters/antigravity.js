@@ -10,96 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const { classifyPath } = require('../../src/lib/targets');
 
-const GREP_SKIP_DIRS = new Set([
-  '.git', '.hg', '.svn', 'node_modules', 'vendor', 'dist', 'build', 'coverage',
-  '.next', '.nuxt', '.cache', '.turbo', '.venv', 'venv',
-]);
 const MAX_GREP_DIRS = 512;
 
-function globRegExp(glob) {
-  let source = '';
-  const value = String(glob || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '');
-
-  // Unknown glob constructs stay conservative: an include we cannot model
-  // must not be used to declare a vault file unreachable.
-  if (/[\[\]{}()!]/.test(value)) return null;
-
-  for (let i = 0; i < value.length; i++) {
-    const c = value[i];
-    if (c === '*' && value[i + 1] === '*') {
-      if (value[i + 2] === '/') {
-        source += '(?:.*/)?';
-        i += 2;
-      } else {
-        source += '.*';
-        i += 1;
-      }
-    } else if (c === '*') {
-      source += '[^/]*';
-    } else if (c === '?') {
-      source += '[^/]';
-    } else {
-      source += c.replace(/[.*+?^${}|[\]\\]/g, '\\$&');
-    }
-  }
-  return new RegExp(`^${source}$`, process.platform === 'win32' ? 'i' : '');
-}
-
-function included(file, root, includes) {
-  if (includes == null || (Array.isArray(includes) && includes.length === 0)) return true;
-  const patterns = Array.isArray(includes) ? includes : [includes];
-  const relative = path.relative(root, file).replace(/\\/g, '/');
-  const base = path.basename(file);
-  // ripgrep applies globs in order, with the last matching rule winning.
-  // With at least one positive glob, files start excluded; a negative-only
-  // list starts included and merely subtracts matches.
-  const hasPositive = patterns.some((pattern) => typeof pattern === 'string' && !pattern.startsWith('!'));
-  let selected = !hasPositive;
-
-  for (const raw of patterns) {
-    if (typeof raw !== 'string') return true;
-    const negative = raw.startsWith('!');
-    const pattern = (negative ? raw.slice(1) : raw).replace(/\\/g, '/');
-    const re = globRegExp(pattern);
-    // Unsupported positive globs might include the file; unsupported negative
-    // globs cannot safely prove that the tool excludes it.
-    if (!re) {
-      if (!negative) selected = true;
-      continue;
-    }
-    const matches = re.test(pattern.includes('/') ? relative : base);
-    if (matches) selected = !negative;
-  }
-  return selected;
-}
-
-function queryMatches(file, query, isRegex, caseInsensitive) {
-  let raw;
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    return false;
-  }
-
-  // If a future Antigravity payload changes the query type, fail closed for
-  // an otherwise reachable vault file without ever echoing the query/value.
-  if (typeof query !== 'string') return true;
-  let matcher;
-  try {
-    matcher = isRegex
-      ? new RegExp(query, caseInsensitive ? 'i' : '')
-      : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), caseInsensitive ? 'i' : '');
-  } catch {
-    // Antigravity uses ripgrep's regex engine, not JavaScript's. A pattern JS
-    // rejects may still be valid there, so do not turn that mismatch into a
-    // bypass for an otherwise reachable vault file.
-    return true;
-  }
-
-  return raw.split(/\r?\n/).some((line) => matcher.test(line));
-}
-
-function vaultFiles(searchPath, includes) {
+function vaultFiles(searchPath) {
   let stat;
   try {
     stat = fs.statSync(searchPath);
@@ -108,7 +21,6 @@ function vaultFiles(searchPath, includes) {
   }
 
   if (stat.isFile()) {
-    // Antigravity documents Includes as a directory-only filter.
     return { files: classifyPath(searchPath).secret ? [searchPath] : [], complete: true };
   }
   if (!stat.isDirectory()) return { files: [], complete: true };
@@ -116,6 +28,7 @@ function vaultFiles(searchPath, includes) {
   const found = [];
   const pending = [searchPath];
   let visited = 0;
+  let complete = true;
   while (pending.length && visited < MAX_GREP_DIRS) {
     const dir = pending.shift();
     visited++;
@@ -127,11 +40,13 @@ function vaultFiles(searchPath, includes) {
     }
     for (const entry of entries) {
       const file = path.join(dir, entry.name);
-      if (entry.isDirectory() && !GREP_SKIP_DIRS.has(entry.name.toLowerCase())) pending.push(file);
-      else if (entry.isFile() && classifyPath(file).secret && included(file, searchPath, includes)) found.push(file);
+      if (entry.isDirectory()) {
+        if (visited + pending.length < MAX_GREP_DIRS) pending.push(file);
+        else complete = false;
+      } else if (entry.isFile() && classifyPath(file).secret) found.push(file);
     }
   }
-  return { files: found, complete: pending.length === 0 };
+  return { files: found, complete: complete && pending.length === 0 };
 }
 
 function normalizeGrep(base, ti, abs) {
@@ -145,11 +60,9 @@ function normalizeGrep(base, ti, abs) {
 
   for (const requested of searchPaths) {
     const target = abs(requested);
-    const reachable = vaultFiles(target, ti.Includes);
+    const reachable = vaultFiles(target);
     if (!reachable.complete) incompleteTarget = incompleteTarget || target;
-    for (const file of reachable.files) {
-      if (queryMatches(file, ti.Query, ti.IsRegex === true, ti.CaseInsensitive === true)) matches.push(file);
-    }
+    matches.push(...reachable.files);
   }
 
   const unique = [...new Set(matches)];
@@ -172,9 +85,8 @@ function normalize(data) {
     case 'view_file':
       return { ...base, kind: 'read', path: abs(ti.AbsolutePath) };
 
-    // grep_search devolve as linhas encontradas. Uma busca em diretório pode
-    // alcançar .env e outros cofres; só negamos quando filtros + consulta
-    // realmente podem devolver uma linha deles, mantendo o uso normal leve.
+    // Não reimplementa regex/glob/encoding do ripgrep: se a busca alcança
+    // qualquer cofre, nega. MatchPerLine=false só devolve nomes e segue livre.
     case 'grep_search':
       return normalizeGrep(base, ti, abs);
 
@@ -214,7 +126,9 @@ function normalize(data) {
 }
 
 function render(result) {
-  if (result.action !== 'deny') return JSON.stringify({ decision: 'allow' });
+  if (result.action !== 'deny') {
+    return JSON.stringify({ decision: 'ask', reason: 'wardenv found no secret risk; apply normal Antigravity permissions.' });
+  }
   return JSON.stringify({
     decision: 'deny',
     reason: result.context ? `${result.reason}\n\n${result.context}` : result.reason,

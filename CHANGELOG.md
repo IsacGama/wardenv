@@ -6,9 +6,10 @@
 
 - Google Antigravity 2.0 adapter and installer target (`wardenv install antigravity`). It
   guards `view_file`, `grep_search`, `run_command`, and all three file-write tools through
-  the official `PreToolUse` contract. The named hook entry is protected against both
-  removal and `enabled: false`; output redaction remains unavailable because Antigravity's
-  `PostToolUse` hook cannot rewrite tool results.
+  the official `PreToolUse` contract. Safe calls return `ask` rather than auto-approving;
+  directory grep is denied whenever it can reach a vault. The named hook entry is protected
+  against removal, any `enabled` mutation and workspace shadowing; output redaction remains
+  unavailable because Antigravity's `PostToolUse` hook cannot rewrite tool results.
 - 10 Antigravity adapter, installer, and self-disarm regression cases; 111 tests total.
 
 ## 0.2.0 — 2026-09-23

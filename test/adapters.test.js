@@ -119,9 +119,13 @@ for (const [agent, c] of Object.entries(CASES)) {
     assert.ok(denied(run(PRE, agent, c.write(cwd, 'config.ts', `const k = "${SECRET}"`))));
   });
 
-  // Cursor exige JSON em todo caminho. Antigravity exige uma decisão
-  // explícita; os outros agentes não recebem nada quando não há deny.
-  const ALLOWED = agent === 'cursor' ? {} : agent === 'antigravity' ? { decision: 'allow' } : null;
+  // Cursor exige JSON em todo caminho. Antigravity não tem "no opinion":
+  // ask preserva a permissão normal sem auto-aprovar; os outros calam.
+  const ALLOWED = agent === 'cursor'
+    ? {}
+    : agent === 'antigravity'
+      ? { decision: 'ask', reason: 'wardenv found no secret risk; apply normal Antigravity permissions.' }
+      : null;
 
   test(`atrito (${agent}): comando e escrita inocentes passam sem saída`, () => {
     const cwd = sandbox(`${agent}-ok`);
@@ -270,7 +274,7 @@ test('antigravity: grep_search dentro de .env é tratado como leitura', () => {
   assert.doesNotMatch(included.reason, new RegExp(SECRET));
 });
 
-test('antigravity: grep_search na raiz é negado quando alcança uma linha do .env', () => {
+test('antigravity: grep_search na raiz é negado quando um cofre é alcançável', () => {
   const cwd = sandbox('antigravity-grep-root');
   const r = run(PRE, 'antigravity', {
     workspacePaths: [cwd],
@@ -286,7 +290,7 @@ test('antigravity: grep_search na raiz é negado quando alcança uma linha do .e
   assert.doesNotMatch(r.reason, new RegExp(SECRET));
 });
 
-test('atrito (antigravity): grep_search na raiz passa quando não pode devolver o .env', () => {
+test('antigravity: grep_search nega conservadoramente qualquer cofre alcançável', () => {
   const cwd = sandbox('antigravity-grep-root-ok');
   fs.writeFileSync(path.join(cwd, 'app.js'), 'const visible = true;\n');
 
@@ -294,7 +298,7 @@ test('atrito (antigravity): grep_search na raiz passa quando não pode devolver 
     workspacePaths: [cwd],
     toolCall: { name: 'grep_search', args: { SearchPath: cwd, Query: 'visible' } },
   });
-  assert.deepStrictEqual(noMatch, { decision: 'allow' });
+  assert.ok(DENIED.antigravity(noMatch));
 
   const excludedByInclude = run(PRE, 'antigravity', {
     workspacePaths: [cwd],
@@ -304,7 +308,7 @@ test('atrito (antigravity): grep_search na raiz passa quando não pode devolver 
       Includes: ['*.js'],
     } },
   });
-  assert.deepStrictEqual(excludedByInclude, { decision: 'allow' });
+  assert.ok(DENIED.antigravity(excludedByInclude));
 
   const excludedByNegativeGlob = run(PRE, 'antigravity', {
     workspacePaths: [cwd],
@@ -314,7 +318,7 @@ test('atrito (antigravity): grep_search na raiz passa quando não pode devolver 
       Includes: ['!**/.env'],
     } },
   });
-  assert.deepStrictEqual(excludedByNegativeGlob, { decision: 'allow' });
+  assert.ok(DENIED.antigravity(excludedByNegativeGlob));
 
   const filenamesOnly = run(PRE, 'antigravity', {
     workspacePaths: [cwd],
@@ -324,7 +328,15 @@ test('atrito (antigravity): grep_search na raiz passa quando não pode devolver 
       MatchPerLine: false,
     } },
   });
-  assert.deepStrictEqual(filenamesOnly, { decision: 'allow' });
+  assert.equal(filenamesOnly.decision, 'ask');
+
+  const clean = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-antigravity-grep-clean-'));
+  fs.writeFileSync(path.join(clean, 'app.js'), 'const visible = true;\n');
+  const cleanSearch = run(PRE, 'antigravity', {
+    workspacePaths: [clean],
+    toolCall: { name: 'grep_search', args: { SearchPath: clean, Query: 'visible' } },
+  });
+  assert.equal(cleanSearch.decision, 'ask');
 });
 
 test('antigravity: as duas tools de edição bloqueiam segredo novo', () => {

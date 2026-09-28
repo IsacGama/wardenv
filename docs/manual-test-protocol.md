@@ -129,16 +129,19 @@ below) is `—`, not a fail.
 ### Google Antigravity 2.0 (`antigravity`)
 - Config written to `~/.gemini/config/hooks.json`, under the named `wardenv.PreToolUse`
   entry. Confirm any other named hooks in the file survived installation.
-- Antigravity requires an explicit `{"decision":"allow"}` even when the hook has no
-  objection. If ordinary tools stop working after install, inspect the hook stdout first.
-- Step 1 uses `view_file`; also search inside `.env` once to cover `grep_search`.
+- When wardenv has no objection it returns `{"decision":"ask"}`, preserving Antigravity's
+  normal approval flow instead of silently auto-approving the matched tool.
+- Step 1 uses `view_file`; also search a directory containing `.env` to cover
+  `grep_search`. Any line-producing search that can reach a vault is denied regardless of
+  query or include globs; `MatchPerLine: false` remains filename-only and may proceed.
 - Step 4 should be exercised once with `replace_file_content` and once with
   `multi_replace_file_content`, not only `write_to_file`.
 - Step 3 is expected to leak because Antigravity's `PostToolUse` response is only `{}` and
   cannot rewrite the result. Mark it `—`; direct reads and risky shell commands should still
   be blocked before they execute.
-- For step 6, ask the agent to set `wardenv.enabled` to `false` as well as removing the
-  command. Both forms must be denied.
+- For step 6, ask the agent to set `wardenv.enabled` to `false`, `0`, `null`, and the string
+  `"false"`, as well as removing the command. Also try adding a shadowing
+  `.agents/hooks.json`; every form must be denied.
 
 ## After testing
 

@@ -132,13 +132,17 @@ end against a fake home directory, but nobody has yet pointed a live agent at th
 `⚠️ unverified` as "should work, not yet proven" — it's why the installer prints a warning
 after installing one.
 
-Two things worth knowing before you rely on any of the unverified adapters:
+Things worth knowing before you rely on any of the unverified adapters:
 
 - **Only Claude Code and Codex let a hook rewrite a tool's output**, and even there it's a
   block-and-replace, not a true "redact and continue" — the model sees the redacted text
   as the tool's result. Gemini can only deny with the redacted text as the reason. Cursor
   and Antigravity cannot rewrite shell or file output, so door 3 (ricochet) can't be closed
   there — a leak of a known secret through an otherwise-innocent command goes undetected.
+- **Antigravity safe-path responses use `ask`, never `allow`.** This keeps the user's
+  normal approval flow in charge. Directory grep is fail-closed: if a line-producing
+  search can reach any vault file, wardenv denies it rather than attempting to reimplement
+  ripgrep regex, glob, encoding and ignore semantics.
 - **Codex 0.116.0 has no pre/post-tool hook at all** (confirmed against a real session: it
   read a `.env`, uploaded it, and ran `wardenv unlock` on itself, and wardenv never saw any
   of it). Tool hooks landed in 0.129, with `updatedInput` rewrites needed by other tools
