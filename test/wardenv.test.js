@@ -18,12 +18,19 @@ const { collectKnownSecrets, redactText, parseEnv } = require('../src/lib/redact
 test('cofre: arquivos de segredo são reconhecidos', () => {
   const secrets = [
     '.env', '.env.local', '.env.production', '.env.development.local',
+    'env.local', 'env.production',
     'app/.env', 'C:/proj/.env', 'id_rsa', '.ssh/id_ed25519',
     'certs/server.pem', 'private.key', 'service-account.json',
     '.npmrc', 'terraform.tfstate', '.aws/credentials',
   ];
   for (const p of secrets) {
     assert.equal(classifyPath(p).secret, true, `deveria bloquear: ${p}`);
+  }
+});
+
+test('atrito: arquivos fonte chamados env.<ext> não são cofres', () => {
+  for (const file of ['env.py', 'env.ts', 'env.js', 'env.mjs', 'env.sh']) {
+    assert.equal(classifyPath(file).secret, false, file);
   }
 });
 
@@ -108,15 +115,21 @@ test('redige segredos de .env em subprojetos do monorepo, mas ignora dependênci
   const appSecret = 'monorepo-secret-123456';
   const ignoredSecret = 'dependency-secret-123456';
   const bareEnvValue = 'bare-env-value-123456';
+  const sourceValue = 'source-code-value-123456';
   fs.writeFileSync(path.join(app, 'env.local'), `APP_TOKEN=${appSecret}\n`);
   fs.writeFileSync(path.join(app, 'env'), `NOT_AN_ENV_FILE=${bareEnvValue}\n`);
+  fs.writeFileSync(path.join(app, 'env.py'), `config = ${sourceValue}\n`);
+  fs.writeFileSync(path.join(app, 'env.ts'), `export const runtimeEnv = ${sourceValue}\n`);
   fs.writeFileSync(path.join(app, '.env.example'), 'EXAMPLE_TOKEN=template-value-123456\n');
+  fs.writeFileSync(path.join(app, '.env.example.local'), 'EXAMPLE_LOCAL=template-local-123456\n');
   fs.writeFileSync(path.join(dependency, '.env'), `DEP_TOKEN=${ignoredSecret}\n`);
 
   const known = collectKnownSecrets(root);
   assert.equal(known.get(appSecret), 'APP_TOKEN');
   assert.equal(known.has(bareEnvValue), false, 'arquivo nu chamado env não é env.<sufixo>');
+  assert.equal(known.has(sourceValue), false, 'env.py/env.ts são código, não dotenv');
   assert.equal(known.has('template-value-123456'), false, 'template não deveria entrar no índice');
+  assert.equal(known.has('template-local-123456'), false, 'template composto também deve ser ignorado');
   assert.equal(known.has(ignoredSecret), false, 'node_modules não deveria ser percorrido');
 });
 

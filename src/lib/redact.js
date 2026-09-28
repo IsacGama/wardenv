@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { isEnvFileName } = require('./targets');
 
 const MASK = (name) => `«wardenv:${name}»`;
 
@@ -59,11 +60,11 @@ const SHAPES = [
   [new RegExp(`${PEM_OPEN}[A-Z ]*PRIVATE KEY-----[\\s\\S]*?${PEM_CLOSE}[A-Z ]*PRIVATE KEY-----`, 'g'), 'private-key'],
 ];
 
-const ENV_FILE_RE = /^(?:\.env(?:$|\.)|env\.[a-z0-9]+$)/i;
-const TEMPLATE_SUFFIX_RE = /\.(example|sample|template|dist|defaults)$/i;
+const TEMPLATE_NAME_RE = /^\.?env\.(example|sample|template|dist|defaults)\b/i;
 const DESCENT_SKIP = new Set([
   '.git', '.hg', '.svn', 'node_modules', 'vendor', 'dist', 'build', 'coverage',
-  '.next', '.nuxt', '.cache', '.turbo', '.venv', 'venv',
+  '.next', '.nuxt', '.cache', '.turbo', '.venv', 'venv', '.env', 'env',
+  'target', '__pycache__', '.gradle', '.terraform',
 ]);
 const MAX_DESCENDANT_DEPTH = 4;
 const MAX_DESCENDANT_DIRS = 256;
@@ -71,7 +72,7 @@ const MAX_DESCENDANT_DIRS = 256;
 function addEnvSecrets(file, name, found, seen) {
   const resolved = path.resolve(file);
   const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  if (seen.has(key) || !ENV_FILE_RE.test(name) || TEMPLATE_SUFFIX_RE.test(name)) return;
+  if (seen.has(key) || !isEnvFileName(name) || TEMPLATE_NAME_RE.test(name)) return;
   seen.add(key);
 
   let raw = '';

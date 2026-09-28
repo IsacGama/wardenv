@@ -12,7 +12,9 @@
   files.** Known-value discovery now scans descendants with strict depth/directory bounds,
   skips dependency/build trees and templates, and recognizes both `.env.local` and
   `env.local` conventions.
-- 5 output/monorepo regression tests; 106 tests total.
+- Dotenv discovery now shares the vault naming policy: common `env.local`-style suffixes
+  are supported, while source files such as `env.py`, `env.ts` and `env.js` plus compound
+  templates such as `.env.example.local` are ignored. 107 tests total.
 
 ## 0.2.0 — 2026-09-23
 

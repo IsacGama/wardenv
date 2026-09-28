@@ -19,10 +19,20 @@ const TEMPLATE_NAMES = new Set([
   'env.template',
 ]);
 
+const ENV_SUFFIXES = new Set([
+  'local', 'development', 'dev', 'production', 'prod', 'staging', 'stage',
+  'test', 'testing', 'preview', 'ci', 'docker',
+]);
+
+function isEnvFileName(fileName) {
+  const name = String(fileName || '').toLowerCase();
+  if (name === '.env' || name.startsWith('.env.')) return true;
+  const match = /^env\.([a-z0-9_-]+)$/.exec(name);
+  return !!(match && ENV_SUFFIXES.has(match[1]));
+}
+
 // Nome de arquivo que é cofre por si só, em qualquer diretório.
 const SECRET_FILE_RE = [
-  /^\.env($|\.)/i,              // .env .env.local .env.production .env.x
-  /^env\.[a-z0-9]+$/i,          // env.local (convenção de alguns stacks)
   /\.pem$/i,
   /\.key$/i,
   /\.p12$/i,
@@ -97,6 +107,10 @@ function classifyPath(filePath) {
     return { secret: false, kind: 'template' };
   }
 
+  if (isEnvFileName(base)) {
+    return { secret: true, kind: 'arquivo', reason: base };
+  }
+
   for (const re of SECRET_FILE_RE) {
     if (re.test(base)) {
       return { secret: true, kind: 'arquivo', reason: base };
@@ -112,4 +126,4 @@ function classifyPath(filePath) {
   return { secret: false };
 }
 
-module.exports = { classifyPath, TEMPLATE_NAMES };
+module.exports = { classifyPath, TEMPLATE_NAMES, ENV_SUFFIXES, isEnvFileName };
