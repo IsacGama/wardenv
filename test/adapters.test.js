@@ -339,6 +339,26 @@ test('antigravity: grep_search nega conservadoramente qualquer cofre alcançáve
   assert.equal(cleanSearch.decision, 'ask');
 });
 
+test('atrito: grep_search na raiz de projeto JS não conta node_modules nem .git', () => {
+  // Achado real: um projeto vite tem node_modules/vite/dist/client/env.mjs e
+  // centenas de diretórios; todo grep na raiz era negado.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-antigravity-grep-node-'));
+  fs.writeFileSync(path.join(root, 'app.js'), 'const visible = true;\n');
+  for (let i = 0; i < 600; i++) fs.mkdirSync(path.join(root, 'node_modules', `pkg${i}`), { recursive: true });
+  fs.mkdirSync(path.join(root, 'node_modules', 'vite', 'dist', 'client'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'node_modules', 'vite', 'dist', 'client', 'env.mjs'), 'export {}\n');
+  fs.mkdirSync(path.join(root, '.git'));
+  const grep = (SearchPath) => run(PRE, 'antigravity', {
+    workspacePaths: [root],
+    toolCall: { name: 'grep_search', args: { SearchPath, Query: 'visible' } },
+  });
+  assert.equal(grep(root).decision, 'ask');
+
+  // A raiz da busca nunca é pulada: buscar dentro de node_modules continua avaliado.
+  fs.writeFileSync(path.join(root, 'node_modules', 'pkg1', '.env'), `SECRET_KEY=${SECRET}\n`);
+  assert.ok(DENIED.antigravity(grep(path.join(root, 'node_modules', 'pkg1'))));
+});
+
 test('antigravity: as duas tools de edição bloqueiam segredo novo', () => {
   const cwd = sandbox('antigravity-multi');
   const file = path.join(cwd, 'config.ts');

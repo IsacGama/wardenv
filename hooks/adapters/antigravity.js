@@ -11,6 +11,12 @@ const path = require('path');
 const { classifyPath } = require('../../src/lib/targets');
 
 const MAX_GREP_DIRS = 512;
+// Árvores geradas que não descem na contagem: node_modules (JS) e target
+// (Rust/Tauri) sozinhos estouram o limite e negavam todo grep na raiz. O
+// ripgrep já pula .git e, via .gitignore, as demais. build/dist ficam DENTRO
+// de propósito: ali já apareceu credencial de verdade. Buscar dentro de uma
+// destas continua avaliado, porque a raiz da busca nunca é pulada.
+const GREP_SKIP_DIRS = new Set(['.git', 'node_modules', 'target', '.venv', 'venv', '__pycache__']);
 
 function vaultFiles(searchPath) {
   let stat;
@@ -41,6 +47,7 @@ function vaultFiles(searchPath) {
     for (const entry of entries) {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (GREP_SKIP_DIRS.has(entry.name)) continue;
         if (visited + pending.length < MAX_GREP_DIRS) pending.push(file);
         else complete = false;
       } else if (entry.isFile() && classifyPath(file).secret) found.push(file);
