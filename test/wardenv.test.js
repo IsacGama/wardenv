@@ -29,8 +29,15 @@ test('cofre: arquivos de segredo são reconhecidos', () => {
 });
 
 test('atrito: arquivos fonte chamados env.<ext> não são cofres', () => {
-  for (const file of ['env.py', 'env.ts', 'env.js', 'env.mjs', 'env.sh']) {
+  for (const file of ['env.py', 'env.ts', 'env.js', 'env.mjs']) {
     assert.equal(classifyPath(file).secret, false, file);
+  }
+});
+
+test('cofre: env.<sufixo> fora de código continua cofre (backup, docker, SAM, ambiente)', () => {
+  // Lista de permissão de sufixos liberava estes, que a main bloqueia.
+  for (const file of ['env.list', 'env.bak', 'env.json', 'env.uat', 'env.sh', 'env.local']) {
+    assert.equal(classifyPath(file).secret, true, file);
   }
 });
 

@@ -19,16 +19,21 @@ const TEMPLATE_NAMES = new Set([
   'env.template',
 ]);
 
-const ENV_SUFFIXES = new Set([
-  'local', 'development', 'dev', 'production', 'prod', 'staging', 'stage',
-  'test', 'testing', 'preview', 'ci', 'docker',
+// `env.<x>` é cofre por padrão (env.local, env.list do docker, env.bak,
+// env.json do SAM...). Só código-fonte fica de fora: migrations/env.py,
+// src/env.ts e node_modules/vite/.../env.mjs não têm segredo e, tratados
+// como cofre, bloqueavam leitura e mascaravam código em toda saída.
+// Lista de exclusão, não de permissão: sufixo desconhecido continua cofre.
+const CODE_EXTENSIONS = new Set([
+  'js', 'mjs', 'cjs', 'jsx', 'ts', 'mts', 'cts', 'tsx', 'py', 'pyi', 'rb', 'go',
+  'rs', 'java', 'kt', 'php', 'cs', 'swift', 'dart', 'scala', 'lua', 'vue', 'svelte', 'astro',
 ]);
 
 function isEnvFileName(fileName) {
   const name = String(fileName || '').toLowerCase();
   if (name === '.env' || name.startsWith('.env.')) return true;
   const match = /^env\.([a-z0-9_-]+)$/.exec(name);
-  return !!(match && ENV_SUFFIXES.has(match[1]));
+  return !!(match && !CODE_EXTENSIONS.has(match[1]));
 }
 
 // Nome de arquivo que é cofre por si só, em qualquer diretório.
@@ -126,4 +131,4 @@ function classifyPath(filePath) {
   return { secret: false };
 }
 
-module.exports = { classifyPath, TEMPLATE_NAMES, ENV_SUFFIXES, isEnvFileName };
+module.exports = { classifyPath, TEMPLATE_NAMES, isEnvFileName };
