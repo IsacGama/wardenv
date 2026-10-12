@@ -10,7 +10,9 @@
   redaction had any chance to help. wardenv now unwraps Bash, sh, zsh, cmd, PowerShell and
   pwsh recursively, including transparent `rtk proxy`, sudo/doas options, and mixed nested
   shells. Quoted documentation and ordinary nested commands remain allowed.
-- Upload priority, fail-closed nesting depth and quote-state regressions; 108 tests total.
+- Upload priority, fail-closed nesting depth and quote-state regressions. Command segments
+  also include the legacy split, so non-POSIX quoting (`$'\''`, PowerShell `C:\tmp\;`) can
+  never hide a command that the previous splitter caught. 109 tests total.
 
 ## 0.2.0 — 2026-09-23
 

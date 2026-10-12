@@ -264,6 +264,15 @@ function splitCommandSegments(command) {
 
   const tail = text.slice(start).trim();
   if (tail) segments.push(tail);
+
+  // Soma os segmentos do split ingênuo (o da main). O rastreio de aspas acima
+  // erra quando a sintaxe foge do POSIX — `$'\''`, `C:\tmp\;` no PowerShell —
+  // e aí junta o comando perigoso num segmento só. Segmento a mais só pode
+  // achar mais coisa, então o resultado nunca fica abaixo do split antigo.
+  for (const piece of text.split(/&&|\|\||[;|]/)) {
+    const segment = piece.trim();
+    if (segment && !segments.includes(segment)) segments.push(segment);
+  }
   return segments;
 }
 
