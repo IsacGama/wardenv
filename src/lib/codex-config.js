@@ -207,7 +207,23 @@ function codexConfigProblem(text) {
       return `active Codex profile ${activeProfile} disables hooks`;
     }
   }
+  if (looksDisabling(text)) return 'disables Codex hooks in config.toml';
   return null;
+}
+
+// Rede de segurança do parser acima, que só entende o TOML que previu: um
+// `# """` no comentário mascarava o resto do arquivo; tabela inline aninhada
+// e array multilinha também passavam. Aqui qualquer linha que PAREÇA desligar
+// os hooks recusa, sem máscara e em qualquer seção. Falso positivo vira
+// recusa de install (e o humano edita o arquivo); falso negativo vira brecha.
+const DISABLE_LINE_RE = /(?:^|[\s.{,"'])(?:(?:codex_)?hooks["']?\s*=\s*false|allow_managed_hooks_only["']?\s*=\s*true)\b/;
+const ESCAPED_KEY_RE = /^[^=]*\\[uU][0-9a-fA-F]{4}[^=]*=\s*(?:true|false)\b/;
+
+function looksDisabling(text) {
+  return String(text || '').replace(/^﻿/, '').split(/\r?\n/).some((raw) => {
+    const line = stripComment(raw).trim();
+    return DISABLE_LINE_RE.test(line) || ESCAPED_KEY_RE.test(line);
+  });
 }
 
 function isCodexConfig(filePath) {

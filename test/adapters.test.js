@@ -204,6 +204,16 @@ test('codex: MCP e tools locais não recebem caminho ou valor secreto', () => {
   });
   assert.ok(DENIED.codex(literal));
   assert.doesNotMatch(JSON.stringify(literal), new RegExp(SECRET));
+
+  // Em tool de arquivo o caminho pode vir em qualquer chave, não só `path`.
+  for (const [tool_name, tool_input] of [
+    ['mcp__filesystem__move_file', { from: '.env', to: 'x' }],
+    ['mcp__filesystem__read_file', { name: '.env' }],
+    ['mcp__storage__upload', { blob: '.env' }],
+    ['mcp__filesystem__read_file', { args: ['.env'] }],
+  ]) {
+    assert.ok(DENIED.codex(run(PRE, 'codex', { tool_name, cwd, tool_input })), `${tool_name} ${JSON.stringify(tool_input)}`);
+  }
 });
 
 test('codex: comando dentro de MCP passa pela mesma policy de shell', () => {

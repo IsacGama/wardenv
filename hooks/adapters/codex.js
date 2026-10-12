@@ -152,7 +152,11 @@ function normalizeOpaque(b, input) {
   const paths = leaves
     .filter((leaf) => {
       const pathKey = /(?:path|file|filename|source|src|target|input|upload|attachment|resource|uri)/i.test(leaf.key);
-      const plainToolArgument = pathTool && !leaf.key && !/\s/.test(leaf.value.trim());
+      // Em tool de arquivo, qualquer chave pode carregar o caminho (from, name,
+      // blob, args[0]...). Texto com espaço é prosa (mensagem de Slack) e passa,
+      // assim como chaves que são conteúdo e nunca caminho.
+      const contentKey = /^(content|text|body|message|description|title|comment)$/i.test(leaf.key);
+      const plainToolArgument = pathTool && !contentKey && !/\s/.test(leaf.value.trim());
       return pathKey || plainToolArgument;
     })
     .map((leaf) => leaf.value.trim())

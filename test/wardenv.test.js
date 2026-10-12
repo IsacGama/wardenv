@@ -608,9 +608,25 @@ test('atrito: editar a config do agente sem tocar no wardenv continua liberado',
     false,
     'trocar modelo não desarma hooks'
   );
-  const harmlessToml = '[features]\nhooks = true\nHooks = false\n' +
-    'note = """\nfeatures.hooks = false\n"""\n';
-  assert.equal(checkWrite({ filePath: codexToml, body: harmlessToml }).block, false, 'TOML case-sensitive e multiline');
+  const harmlessToml = '[features]\nhooks = true # hooks = false is documentation only\nHooks = false\n';
+  assert.equal(checkWrite({ filePath: codexToml, body: harmlessToml }).block, false, 'TOML case-sensitive e comentário');
+});
+
+test('cofre: config.toml não esconde hooks = false de quem só entende o TOML previsto', () => {
+  // String multilinha com o texto `hooks = false` dentro também recusa: a
+  // checagem linha a linha ignora máscara de propósito, porque toda máscara
+  // testada escondia config real em algum caso.
+  const { codexConfigProblem } = require('../src/lib/codex-config');
+  const disabling = [
+    'x = 1 # """\n[features]\nhooks = false\n',
+    "x = '\"\"\"'\n[features]\nhooks = false\n",
+    'profile = "w"\nprofiles = { w = { features = { hooks = false } } }\n',
+    '[features]\nx = [\n  [1]\n]\nhooks = false\n',
+    '"\\U00000066eatures".hooks = false\n',
+  ];
+  for (const toml of disabling) {
+    assert.ok(codexConfigProblem(toml), `deveria recusar: ${JSON.stringify(toml)}`);
+  }
 });
 
 // ------------------------------------------------------ wrappers transparentes

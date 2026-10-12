@@ -15,7 +15,9 @@
 - Codex installs the official `commandWindows` override and self-guard protects both
   platform commands from mutation. Installation refuses `config.toml` states that disable
   or ignore user hooks, and the self-guard prevents the agent from introducing them.
-  6 new adapter/installer regressions; 107 tests total.
+  A line-level backstop refuses any line that looks like it disables hooks, even inside
+  strings or nested inline tables, so parser gaps fail closed. File-like MCP tools check
+  every whitespace-free argument, whatever its key. 108 tests total.
 
 ## 0.2.0 — 2026-09-23
 

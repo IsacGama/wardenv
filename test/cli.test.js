@@ -226,8 +226,7 @@ test('install: Codex recusa quando config.toml desliga ou ignora hooks de usuár
   fs.mkdirSync(codexDir);
   fs.writeFileSync(
     path.join(codexDir, 'config.toml'),
-    '[features]\nhooks = true # hooks = false is documentation only\nHooks = false\n' +
-      'note = """\nfeatures.hooks = false\n"""\n'
+    '[features]\nhooks = true # hooks = false is documentation only\nHooks = false\n'
   );
   const env = { ...fakeExecutableOnPath(home, 'codex', '0.156.0'), CODEX_HOME: codexDir };
   const allowed = spawnSync(process.execPath, ['-e', [
