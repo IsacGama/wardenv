@@ -12,7 +12,18 @@
   shells. Quoted documentation and ordinary nested commands remain allowed.
 - Upload priority, fail-closed nesting depth and quote-state regressions. Command segments
   also include the legacy split, so non-POSIX quoting (`$'\''`, PowerShell `C:\tmp\;`) can
-  never hide a command that the previous splitter caught. 109 tests total.
+  never hide a command that the previous splitter caught.
+- **Output redaction silently skipped large and deeply nested results.** A string over
+  400,000 characters was returned untouched, and strings nested beyond four object levels
+  were never scanned. The post-tool hook now walks structured output iteratively at any
+  depth and redacts strings regardless of size while preserving the original shape.
+- **Commands run from a monorepo root did not know secrets stored in package-level `.env`
+  files.** Known-value discovery now scans descendants with strict depth/directory bounds,
+  skips dependency/build trees and templates, and recognizes both `.env.local` and
+  `env.local` conventions.
+- Dotenv discovery now shares the vault naming policy: every `env.<suffix>` stays a vault
+  (`env.local`, `env.list`, `env.bak`...) except source-code extensions such as `env.py`,
+  `env.ts` and `env.mjs`; compound templates such as `.env.example.local` are ignored.
 
 ## 0.2.0 — 2026-09-23
 

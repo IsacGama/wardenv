@@ -11,19 +11,33 @@ const assert = require('node:assert');
 
 const { classifyPath } = require('../src/lib/targets');
 const { analyzeCommand } = require('../src/lib/command');
-const { redactText, parseEnv } = require('../src/lib/redact');
+const { collectKnownSecrets, redactText, parseEnv } = require('../src/lib/redact');
 
 // ---------------------------------------------------------------- caminhos
 
 test('cofre: arquivos de segredo são reconhecidos', () => {
   const secrets = [
     '.env', '.env.local', '.env.production', '.env.development.local',
+    'env.local', 'env.production',
     'app/.env', 'C:/proj/.env', 'id_rsa', '.ssh/id_ed25519',
     'certs/server.pem', 'private.key', 'service-account.json',
     '.npmrc', 'terraform.tfstate', '.aws/credentials',
   ];
   for (const p of secrets) {
     assert.equal(classifyPath(p).secret, true, `deveria bloquear: ${p}`);
+  }
+});
+
+test('atrito: arquivos fonte chamados env.<ext> não são cofres', () => {
+  for (const file of ['env.py', 'env.ts', 'env.js', 'env.mjs']) {
+    assert.equal(classifyPath(file).secret, false, file);
+  }
+});
+
+test('cofre: env.<sufixo> fora de código continua cofre (backup, docker, SAM, ambiente)', () => {
+  // Lista de permissão de sufixos liberava estes, que a main bloqueia.
+  for (const file of ['env.list', 'env.bak', 'env.json', 'env.uat', 'env.sh', 'env.local']) {
+    assert.equal(classifyPath(file).secret, true, file);
   }
 });
 
@@ -179,6 +193,54 @@ test('redige valores conhecidos vindos do .env', () => {
   assert.ok(!text.includes('Sup3rS3cr3tPassword123'), 'valor vazou');
   assert.ok(text.includes('«wardenv:DB_PASSWORD»'));
   assert.deepEqual(hits, ['DB_PASSWORD']);
+});
+
+test('redige segredos de .env em subprojetos do monorepo, mas ignora dependências e templates', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-monorepo-'));
+  const app = path.join(root, 'apps', 'web');
+  const dependency = path.join(root, 'node_modules', 'fixture');
+  fs.mkdirSync(app, { recursive: true });
+  fs.mkdirSync(dependency, { recursive: true });
+
+  const appSecret = 'monorepo-secret-123456';
+  const ignoredSecret = 'dependency-secret-123456';
+  const bareEnvValue = 'bare-env-value-123456';
+  const sourceValue = 'source-code-value-123456';
+  fs.writeFileSync(path.join(app, 'env.local'), `APP_TOKEN=${appSecret}\n`);
+  fs.writeFileSync(path.join(app, 'env'), `NOT_AN_ENV_FILE=${bareEnvValue}\n`);
+  fs.writeFileSync(path.join(app, 'env.py'), `config = ${sourceValue}\n`);
+  fs.writeFileSync(path.join(app, 'env.ts'), `export const runtimeEnv = ${sourceValue}\n`);
+  fs.writeFileSync(path.join(app, '.env.example'), 'EXAMPLE_TOKEN=template-value-123456\n');
+  fs.writeFileSync(path.join(app, '.env.example.local'), 'EXAMPLE_LOCAL=template-local-123456\n');
+  fs.writeFileSync(path.join(dependency, '.env'), `DEP_TOKEN=${ignoredSecret}\n`);
+
+  const known = collectKnownSecrets(root);
+  assert.equal(known.get(appSecret), 'APP_TOKEN');
+  assert.equal(known.has(bareEnvValue), false, 'arquivo nu chamado env não é env.<sufixo>');
+  assert.equal(known.has(sourceValue), false, 'env.py/env.ts são código, não dotenv');
+  assert.equal(known.has('template-value-123456'), false, 'template não deveria entrar no índice');
+  assert.equal(known.has('template-local-123456'), false, 'template composto também deve ser ignorado');
+  assert.equal(known.has(ignoredSecret), false, 'node_modules não deveria ser percorrido');
+});
+
+test('descoberta descendente limita a fila, não apenas diretórios já visitados', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wardenv-monorepo-bound-'));
+
+  for (let i = 0; i < 8; i++) {
+    const dir = path.join(root, `package-${String(i).padStart(2, '0')}`);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, '.env'), `TOKEN_${i}=bounded-secret-${i}-123456\n`);
+  }
+
+  const known = collectKnownSecrets(root, 0, { maxDown: 1, maxDirs: 2 });
+  assert.equal(known.has('bounded-secret-0-123456'), true, 'primeiro descendente deveria ser visitado');
+  assert.equal(known.has('bounded-secret-1-123456'), false, 'fila não deveria ultrapassar maxDirs');
 });
 
 test('rotula cada forma de segredo corretamente', () => {

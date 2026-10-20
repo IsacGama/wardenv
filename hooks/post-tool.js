@@ -9,7 +9,7 @@
 // Uso: post-tool.js [--agent <nome>]   (padrão: claude)
 // Cada adaptador sabe como o seu agente deixa trocar o output que o modelo vê.
 
-const { collectKnownSecrets, redactText } = require('../src/lib/redact');
+const { collectKnownSecrets, redactDeep } = require('../src/lib/redact');
 const { log } = require('../src/lib/audit');
 
 // Só agentes cujo evento pós-tool deixa trocar o que o modelo vê.
@@ -48,34 +48,15 @@ process.stdin.on('end', () => {
     // estruturada por um blob — só quando havia redação, o que tornava o
     // efeito invisível. Aqui a forma é preservada: redige campo a campo.
     const known = collectKnownSecrets(cwd);
-    const hits = [];
-
-    const scrub = (value, depth = 0) => {
-      if (typeof value === 'string') {
-        if (value.length > 400_000) return value; // trecho gigante: não vale o custo
-        const r = redactText(value, known);
-        hits.push(...r.hits);
-        return r.text;
-      }
-      if (depth >= 4 || value == null || typeof value !== 'object') return value;
-      if (Array.isArray(value)) return value.map((v) => scrub(v, depth + 1));
-      const out = {};
-      for (const [k, v] of Object.entries(value)) out[k] = scrub(v, depth + 1);
-      return out;
-    };
 
     if (raw == null || (typeof raw === 'string' && !raw)) process.exit(0);
-    const clean = scrub(raw);
+    const { value: clean, hits } = redactDeep(raw, known);
 
     if (!hits.length) process.exit(0);
 
-    // O mesmo segredo pode aparecer em stdout e stderr; o relato conta
-    // segredos distintos, não ocorrências.
-    const unique = [...new Set(hits)];
+    log({ event: 'redact-output', tool, hits, agent, cwd });
 
-    log({ event: 'redact-output', tool, hits: unique, agent, cwd });
-
-    process.stdout.write(adapter.renderPost(clean, unique));
+    process.stdout.write(adapter.renderPost(clean, hits));
   } catch {
     process.exit(0);
   }
