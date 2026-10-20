@@ -11,6 +11,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { codexConfigProblem, isCodexConfig, isCodexHooks } = require('./codex-config');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const STATE_DIR = path.join(os.homedir(), '.wardenv');
@@ -69,7 +70,7 @@ function wardenvHooks(text, { allowBom = false } = {}) {
         // própria entrada é o hook, com o comando em command/bash/powershell).
         const list = g && Array.isArray(g.hooks) ? g.hooks : g ? [g] : [];
         for (const h of list) {
-          for (const cmd of [h.command, h.bash, h.powershell]) {
+          for (const cmd of [h.command, h.commandWindows, h.bash, h.powershell]) {
             if (typeof cmd === 'string' && /wardenv[\\/]+hooks[\\/]+(pre|post)-tool\.js/i.test(cmd)) {
               out.add(`${prefix}|${event}|${g.matcher}|${cmd}`);
             }
@@ -125,7 +126,19 @@ function checkWrite({ filePath, body = '', edits = null }, opts = {}) {
     return { block: true, reason: 'modifies wardenv itself' };
   }
 
-  if (AGENT_CONFIG_RE.test(filePath)) {
+  if (isCodexConfig(filePath)) {
+    let current = '';
+    try {
+      current = fs.readFileSync(filePath, 'utf8');
+    } catch {}
+    const after = edits ? applyEdits(current, edits) : body;
+    const beforeProblem = codexConfigProblem(current);
+    const afterProblem = codexConfigProblem(after);
+    if (afterProblem && !beforeProblem) return { block: true, reason: afterProblem };
+    return { block: false };
+  }
+
+  if (AGENT_CONFIG_RE.test(filePath) || isCodexHooks(filePath)) {
     let current = '';
     try {
       current = fs.readFileSync(filePath, 'utf8');

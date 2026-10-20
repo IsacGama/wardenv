@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Nested shells could hide reads and uploads of secret files.** Commands such as
+  `bash -c 'cat .env'`, `cmd /c type .env`, and PowerShell `-Command` were not analyzed
+  inside the executor; uploads hidden the same way could leave the machine before output
+  redaction had any chance to help. wardenv now unwraps Bash, sh, zsh, cmd, PowerShell and
+  pwsh recursively, including transparent `rtk proxy`, sudo/doas options, and mixed nested
+  shells. Quoted documentation and ordinary nested commands remain allowed.
+- Upload priority, fail-closed nesting depth and quote-state regressions. Command segments
+  also include the legacy split, so non-POSIX quoting (`$'\''`, PowerShell `C:\tmp\;`) can
+  never hide a command that the previous splitter caught.
+- **Output redaction silently skipped large and deeply nested results.** A string over
+  400,000 characters was returned untouched, and strings nested beyond four object levels
+  were never scanned. The post-tool hook now walks structured output iteratively at any
+  depth and redacts strings regardless of size while preserving the original shape.
+- **Commands run from a monorepo root did not know secrets stored in package-level `.env`
+  files.** Known-value discovery now scans descendants with strict depth/directory bounds,
+  skips dependency/build trees and templates, and recognizes both `.env.local` and
+  `env.local` conventions.
+- Dotenv discovery now shares the vault naming policy: every `env.<suffix>` stays a vault
+  (`env.local`, `env.list`, `env.bak`...) except source-code extensions such as `env.py`,
+  `env.ts` and `env.mjs`; compound templates such as `.env.example.local` are ignored.
+### Changed
+
+- Codex now hooks every supported local function tool instead of only Bash, `apply_patch`
+  and MCP output. Unknown MCP/local inputs are conservatively checked for shell commands,
+  secret-file paths and literal secret values; PostToolUse redaction covers every local
+  tool result.
+- Direct launches of recognized interactive shells/REPLs are denied at their original
+  `PreToolUse`; explicit TTY/persistent fields are honored when present. This narrows the
+  documented `write_stdin` gap while keeping the limits of the command-only official
+  payload explicit. Complete non-interactive commands remain available.
+- Codex installs the official `commandWindows` override and self-guard protects both
+  platform commands from mutation. Installation refuses `config.toml` states that disable
+  or ignore user hooks, and the self-guard prevents the agent from introducing them.
+  A line-level backstop refuses any line that looks like it disables hooks, even inside
+  strings or nested inline tables, so parser gaps fail closed. File-like MCP tools check
+  every whitespace-free argument, whatever its key.
 ### Added
 
 - Google Antigravity 2.0 adapter and installer target (`wardenv install antigravity`). It
@@ -11,7 +49,7 @@
   `node_modules`, `.git` and Rust `target` are not counted). The named hook entry is protected
   against removal, any `enabled` mutation and workspace shadowing; output redaction remains
   unavailable because Antigravity's `PostToolUse` hook cannot rewrite tool results.
-- 10 Antigravity adapter, installer, and self-disarm regression cases; 112 tests total.
+- 10 Antigravity adapter, installer, and self-disarm regression cases.
 
 ## 0.2.0 — 2026-09-23
 

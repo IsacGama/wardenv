@@ -19,10 +19,25 @@ const TEMPLATE_NAMES = new Set([
   'env.template',
 ]);
 
+// `env.<x>` é cofre por padrão (env.local, env.list do docker, env.bak,
+// env.json do SAM...). Só código-fonte fica de fora: migrations/env.py,
+// src/env.ts e node_modules/vite/.../env.mjs não têm segredo e, tratados
+// como cofre, bloqueavam leitura e mascaravam código em toda saída.
+// Lista de exclusão, não de permissão: sufixo desconhecido continua cofre.
+const CODE_EXTENSIONS = new Set([
+  'js', 'mjs', 'cjs', 'jsx', 'ts', 'mts', 'cts', 'tsx', 'py', 'pyi', 'rb', 'go',
+  'rs', 'java', 'kt', 'php', 'cs', 'swift', 'dart', 'scala', 'lua', 'vue', 'svelte', 'astro',
+]);
+
+function isEnvFileName(fileName) {
+  const name = String(fileName || '').toLowerCase();
+  if (name === '.env' || name.startsWith('.env.')) return true;
+  const match = /^env\.([a-z0-9_-]+)$/.exec(name);
+  return !!(match && !CODE_EXTENSIONS.has(match[1]));
+}
+
 // Nome de arquivo que é cofre por si só, em qualquer diretório.
 const SECRET_FILE_RE = [
-  /^\.env($|\.)/i,              // .env .env.local .env.production .env.x
-  /^env\.[a-z0-9]+$/i,          // env.local (convenção de alguns stacks)
   /\.pem$/i,
   /\.key$/i,
   /\.p12$/i,
@@ -97,6 +112,10 @@ function classifyPath(filePath) {
     return { secret: false, kind: 'template' };
   }
 
+  if (isEnvFileName(base)) {
+    return { secret: true, kind: 'arquivo', reason: base };
+  }
+
   for (const re of SECRET_FILE_RE) {
     if (re.test(base)) {
       return { secret: true, kind: 'arquivo', reason: base };
@@ -112,4 +131,4 @@ function classifyPath(filePath) {
   return { secret: false };
 }
 
-module.exports = { classifyPath, TEMPLATE_NAMES };
+module.exports = { classifyPath, TEMPLATE_NAMES, isEnvFileName };
