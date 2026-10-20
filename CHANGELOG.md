@@ -24,6 +24,22 @@
 - Dotenv discovery now shares the vault naming policy: every `env.<suffix>` stays a vault
   (`env.local`, `env.list`, `env.bak`...) except source-code extensions such as `env.py`,
   `env.ts` and `env.mjs`; compound templates such as `.env.example.local` are ignored.
+### Changed
+
+- Codex now hooks every supported local function tool instead of only Bash, `apply_patch`
+  and MCP output. Unknown MCP/local inputs are conservatively checked for shell commands,
+  secret-file paths and literal secret values; PostToolUse redaction covers every local
+  tool result.
+- Direct launches of recognized interactive shells/REPLs are denied at their original
+  `PreToolUse`; explicit TTY/persistent fields are honored when present. This narrows the
+  documented `write_stdin` gap while keeping the limits of the command-only official
+  payload explicit. Complete non-interactive commands remain available.
+- Codex installs the official `commandWindows` override and self-guard protects both
+  platform commands from mutation. Installation refuses `config.toml` states that disable
+  or ignore user hooks, and the self-guard prevents the agent from introducing them.
+  A line-level backstop refuses any line that looks like it disables hooks, even inside
+  strings or nested inline tables, so parser gaps fail closed. File-like MCP tools check
+  every whitespace-free argument, whatever its key.
 
 ## 0.2.0 — 2026-09-23
 

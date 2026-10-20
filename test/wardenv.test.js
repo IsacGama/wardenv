@@ -573,12 +573,31 @@ test('auto-desarme: desvios da forma direta também são bloqueados', () => {
     ['node "C:\\npm\\node_modules\\', W, '\\src\\cli.js" unlock ', E].join(''),
     ['node -e "require(\'C:/x/', W, '/src/lib/unlock\').grant(process.cwd(),\'', E, '\')"'].join(''),
     ['Start-Process ', W, ' -ArgumentList \'unlock\',\'', E, '\''].join(''),
+    'echo "[features] hooks = false" > ~/.codex/config.toml',
+    'echo "[features] hooks = false" > ".codex/config.toml"',
+    'Set-Content ~/.codex/config.toml "allow_managed_hooks_only = true"',
+    'printf "[features] hooks = false" > "$CODEX_HOME/config.toml"',
+    '"[features] hooks = false" | Set-Content "$env:CODEX_HOME\\config.toml"',
+    'echo [features] hooks = false > "%CODEX_HOME%\\config.toml"',
     // Forjar o TTY e chamar a CLI por dentro de um one-liner.
     ['echo ', E, ' | node -e "process.stdin.isTTY=true;process.stdout.isTTY=true;',
       'process.argv.push(\'unlock\',\'', E, '\');require(\'C:/npm/', W, '/src/cli.js\')"'].join(''),
   ];
   for (const c of cases) {
     assert.equal(analyzeCommand(c).action, 'block', `deveria bloquear: ${c}`);
+  }
+
+  const previousCodexHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = 'C:\\custom-codex';
+    assert.equal(
+      analyzeCommand('echo hooks = false > "C:\\custom-codex\\config.toml"').action,
+      'block',
+      'caminho expandido de CODEX_HOME deveria bloquear'
+    );
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
   }
 });
 
@@ -590,6 +609,7 @@ test('atrito: usar o wardenv sem desarmar continua liberado', () => {
     ['& ', W, ' check "npm run build"'].join(''),
     ['node C:/dev/', W, '/src/cli.js status'].join(''),
     ['git commit -m "docs: explain ', W, ' install"'].join(''),
+    'echo "$CODEX_HOME/config.toml"',
   ];
   for (const c of ok) {
     assert.equal(analyzeCommand(c).action, 'allow', `falso positivo: ${c}`);
@@ -633,6 +653,78 @@ test('auto-desarme: escrita no estado, no código ou na config do agente', () =>
   assert.equal(checkWrite({ filePath: settings, body: '{"hooks":{}}' }).block, true, 'Write sem o hook');
   assert.equal(checkWrite({ filePath: settings, edits: [{ old: '"theme"', new: '"disableAllHooks": true, "theme"' }] }).block, true, 'disableAllHooks');
   assert.equal(checkWrite({ filePath: settings, body: raw.slice(0, -5) }).block, true, 'JSON quebrado');
+
+  // Codex pode registrar um override oficial só para Windows. Alterar apenas
+  // commandWindows desarma o hook naquela plataforma e precisa ser bloqueado.
+  const codex = pathMod.join(home, '.codex', 'hooks.json');
+  fs.mkdirSync(pathMod.dirname(codex), { recursive: true });
+  const windowsCommand = `& ${cmd} --agent codex`;
+  const codexCfg = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{
+    type: 'command',
+    command: cmd,
+    commandWindows: windowsCommand,
+  }] }] } };
+  fs.writeFileSync(codex, JSON.stringify(codexCfg, null, 2));
+  assert.equal(
+    checkWrite({ filePath: codex, edits: [{ old: '--agent codex', new: '--agent claude' }] }).block,
+    true,
+    'alterar commandWindows do Codex'
+  );
+
+  const codexToml = pathMod.join(home, '.codex', 'config.toml');
+  const toml = 'model = "gpt-6-sol"\n\n[features]\nhooks = true\n';
+  fs.writeFileSync(codexToml, toml);
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'hooks = true', new: 'hooks = false' }] }).block,
+    true,
+    'desligar hooks no config.toml'
+  );
+  assert.equal(
+    checkWrite({ filePath: codexToml, body: `allow_managed_hooks_only = true\n${toml}` }).block,
+    true,
+    'ignorar hooks de usuário no config.toml'
+  );
+  fs.writeFileSync(codexToml, '["features"]\n"hooks" = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, body: '["features"]\n"hooks" = false\n' }).block,
+    true,
+    'chave TOML quoted não pode desligar hooks'
+  );
+  fs.writeFileSync(codexToml, 'features . hooks = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'true', new: 'false' }] }).block,
+    true,
+    'chave TOML dotted com espaços não pode desligar hooks'
+  );
+  fs.writeFileSync(codexToml, 'features = { hooks = true }\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, body: 'features = { hooks = false }\n' }).block,
+    true,
+    'inline table não pode desligar hooks'
+  );
+  fs.writeFileSync(codexToml, 'profile = "locked"\n[profiles.locked.features]\nhooks = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'hooks = true', new: 'hooks = false' }] }).block,
+    true,
+    'perfil ativo não pode desligar hooks'
+  );
+
+  const previousCodexHome = process.env.CODEX_HOME;
+  const customCodexHome = pathMod.join(home, 'custom-codex-home');
+  try {
+    process.env.CODEX_HOME = customCodexHome;
+    fs.mkdirSync(customCodexHome);
+    const customHooks = pathMod.join(customCodexHome, 'hooks.json');
+    fs.writeFileSync(customHooks, JSON.stringify(codexCfg, null, 2));
+    assert.equal(
+      checkWrite({ filePath: customHooks, edits: [{ old: '--agent codex', new: '--agent claude' }] }).block,
+      true,
+      'proteger hooks.json sob CODEX_HOME customizado'
+    );
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+  }
 });
 
 test('atrito: editar a config do agente sem tocar no wardenv continua liberado', () => {
@@ -655,6 +747,34 @@ test('atrito: editar a config do agente sem tocar no wardenv continua liberado',
   // Config que ainda não tem o wardenv: nada a proteger.
   const other = pathMod.join(fs.mkdtempSync(pathMod.join(os.tmpdir(), 'wardenv-cfg-none-')), '.claude', 'settings.json');
   assert.equal(checkWrite({ filePath: other, body: '{"hooks":{}}' }).block, false);
+
+  const codexToml = pathMod.join(home, '.codex', 'config.toml');
+  fs.mkdirSync(pathMod.dirname(codexToml), { recursive: true });
+  fs.writeFileSync(codexToml, 'model = "gpt-6-sol"\n\n[features]\nhooks = true\n');
+  assert.equal(
+    checkWrite({ filePath: codexToml, edits: [{ old: 'gpt-6-sol', new: 'gpt-6-astra' }] }).block,
+    false,
+    'trocar modelo não desarma hooks'
+  );
+  const harmlessToml = '[features]\nhooks = true # hooks = false is documentation only\nHooks = false\n';
+  assert.equal(checkWrite({ filePath: codexToml, body: harmlessToml }).block, false, 'TOML case-sensitive e comentário');
+});
+
+test('cofre: config.toml não esconde hooks = false de quem só entende o TOML previsto', () => {
+  // String multilinha com o texto `hooks = false` dentro também recusa: a
+  // checagem linha a linha ignora máscara de propósito, porque toda máscara
+  // testada escondia config real em algum caso.
+  const { codexConfigProblem } = require('../src/lib/codex-config');
+  const disabling = [
+    'x = 1 # """\n[features]\nhooks = false\n',
+    "x = '\"\"\"'\n[features]\nhooks = false\n",
+    'profile = "w"\nprofiles = { w = { features = { hooks = false } } }\n',
+    '[features]\nx = [\n  [1]\n]\nhooks = false\n',
+    '"\\U00000066eatures".hooks = false\n',
+  ];
+  for (const toml of disabling) {
+    assert.ok(codexConfigProblem(toml), `deveria recusar: ${JSON.stringify(toml)}`);
+  }
 });
 
 // ------------------------------------------------------ wrappers transparentes
