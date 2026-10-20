@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Nested shells could hide reads and uploads of secret files.** Commands such as
+  `bash -c 'cat .env'`, `cmd /c type .env`, and PowerShell `-Command` were not analyzed
+  inside the executor; uploads hidden the same way could leave the machine before output
+  redaction had any chance to help. wardenv now unwraps Bash, sh, zsh, cmd, PowerShell and
+  pwsh recursively, including transparent `rtk proxy`, sudo/doas options, and mixed nested
+  shells. Quoted documentation and ordinary nested commands remain allowed.
+- Upload priority, fail-closed nesting depth and quote-state regressions. Command segments
+  also include the legacy split, so non-POSIX quoting (`$'\''`, PowerShell `C:\tmp\;`) can
+  never hide a command that the previous splitter caught.
 - **Output redaction silently skipped large and deeply nested results.** A string over
   400,000 characters was returned untouched, and strings nested beyond four object levels
   were never scanned. The post-tool hook now walks structured output iteratively at any
@@ -15,7 +24,6 @@
 - Dotenv discovery now shares the vault naming policy: every `env.<suffix>` stays a vault
   (`env.local`, `env.list`, `env.bak`...) except source-code extensions such as `env.py`,
   `env.ts` and `env.mjs`; compound templates such as `.env.example.local` are ignored.
-  108 tests total.
 
 ## 0.2.0 — 2026-09-23
 
